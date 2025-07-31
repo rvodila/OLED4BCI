@@ -1,3 +1,7 @@
+"""
+@author: Radovan Vodila (radovan.vodila@ru.nl)
+"""
+
 function flicker_protocol_video_hybrid
 
     %% ---- USER OPTIONS ----
