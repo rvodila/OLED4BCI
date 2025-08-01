@@ -1,3 +1,7 @@
+"""
+@author: Radovan Vodila (radovan.vodila@ru.nl)
+"""
+
 function flicker_protocol_two_images_hybrid
     %% ---- USER OPTIONS ----
     flickerMode = 'hybrid'; % 'freq', 'code', or 'hybrid'
