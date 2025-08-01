@@ -1,15 +1,16 @@
 function flicker_protocol_two_images_hybrid
     %% ---- USER OPTIONS ----
     flickerMode = 'hybrid'; % 'freq', 'code', or 'hybrid'
-    maxDisplaySec = 5;
-    bitPerFrame = 2;
+    maxDisplaySec = 10;
+    framesPerBit = 4;
     overlayAlpha = 128;
-    lb_lum = 0; hb_lum = 255;
+    lb_lum = 50; hb_lum = 195;
     stimSize = 400;
     rel_xs = [0.4, 0.6]; rel_y = 0.5;
-    carrierHzs = [2, 4];
+    carrierHzs = [5, 15];
     imageFiles = {fullfile(pwd, 'project', 'stimulus', 'images', 'kakadu.png'), ...
                   fullfile(pwd, 'project', 'stimulus', 'images', 'zebra2.png')};
+    ramp_len = 4; % number of frames over which to smooth transitions
 
     %% ---- CODE FILE ----
     codefile = fullfile(pwd, 'project', 'stimulus', 'files', 'mgold_61_6521.mat');
@@ -17,6 +18,7 @@ function flicker_protocol_two_images_hybrid
     code  = double(S.codes(1, :));
     code2 = double(S.codes(2, :));
     code  = code(:)'; code2 = code2(:)';
+
 
     %% ---- PSYCHTOOLBOX SETUP ----
     Screen('Preference', 'SkipSyncTests', 1);
@@ -60,15 +62,23 @@ function flicker_protocol_two_images_hybrid
     all_mod_lum = zeros(nOverlays, totalFrames);
     codes = {code, code2};
     mod_signals = zeros(nOverlays, totalFrames);
-
+    code_long_all = cell(1, nOverlays);
     for k = 1:nOverlays
         cur_code = codes{k};
-        code_expanded = repelem(cur_code, bitPerFrame);
+        code_expanded = repelem(cur_code, framesPerBit);
         nrep = ceil(totalFrames / numel(code_expanded));
         code_long = repmat(code_expanded, 1, nrep);
         code_long = code_long(1:totalFrames);
-        code_long = 2 * code_long - 1; % Bipolar mapping
+        % code_long = 2 * code_long - 1; % bipolar
 
+        % --- Padding for smoothing at start
+        pad_val = code_long(1);
+        code_long_padded = [repmat(pad_val, 1, ramp_len) code_long];
+        code_long_smoothed = raised_cosine_smooth(code_long_padded, ramp_len);
+        code_long = code_long_smoothed(ramp_len+1:end); % remove padding
+        code_long_all{k} = code_long;
+
+        % CARRIER
         carrier = 0.5 + 0.5 * sin(2*pi*carrierHzs(k)*t);
 
         switch lower(flickerMode)
@@ -89,6 +99,9 @@ function flicker_protocol_two_images_hybrid
     %% ---- STIMULUS LOOP ----
     vbl = Screen('Flip', win);
     frameCount = 0;
+    vbls = zeros(1, totalFrames);
+    targetVBLs = zeros(1, totalFrames);
+
     try
         while true
             frameCount = frameCount + 1;
@@ -102,7 +115,11 @@ function flicker_protocol_two_images_hybrid
                 Screen('FillRect', win, overlayColor, dstRects(:,k));
             end
 
-            vbl = Screen('Flip', win, vbl + 0.5*ifi);
+                targetTime = vbl + 0.5*ifi;      % What you asked for (scheduled time)
+                vbl = Screen('Flip', win, targetTime);   % When the frame actually flipped
+                vbls(frameCount) = vbl;                 % Store actual flip time
+                targetVBLs(frameCount) = targetTime;    % Store target flip time
+
 
             [keyIsDown, ~, keyCode] = KbCheck;
             if keyIsDown && keyCode(KbName('ESCAPE'))
@@ -119,7 +136,11 @@ function flicker_protocol_two_images_hybrid
     cleanup(win, textures);
 
     %% ---- DIAGNOSTIC PLOTS ----
-    plot_modulation_diagnostics(mod_signals, all_mod_lum, t, codes, flickerMode);
+    % After the stimulus loop, call:
+    plot_modulation_diagnostics(mod_signals, all_mod_lum, t, code_long_all, flickerMode, vbls, targetVBLs, carrierHzs, ifi);
+
+
+
 end
 
 function cleanup(win, textures)
@@ -130,70 +151,112 @@ function cleanup(win, textures)
     ShowCursor;
 end
 
-function plot_modulation_diagnostics(mod_signals, all_mod_lum, t, codes, flickerMode)
-    % Diagnostic plotting for code, luminance, auto/cross-correlation
+function plot_modulation_diagnostics(mod_signals, all_mod_lum, t, code_long_all, flickerMode, vbls, targetVBLs, carrierHzs, ifi)
+    % --- Frame timing analysis ---
+    actual_intervals = diff(vbls);         % Actual frame durations (s)
+    scheduled_intervals = diff(targetVBLs);% What you requested (s)
+    timing_error = vbls - targetVBLs;      % Flip error (s)
 
-    figure('Name','Image Flicker Diagnostics', 'NumberTitle', 'off');
-    nRows = 4; nCols = 2;
-    sp = 1;
+    fprintf('\n=== Frame Timing Diagnostics ===\n');
+    fprintf('Flicker frequencies (Hz): Left: %.3f, Right: %.3f\n', carrierHzs(1), carrierHzs(2));
+    fprintf('Mean actual interval: %.5f s (%.2f Hz), SD: %.5f ms\n', ...
+        mean(actual_intervals), 1/mean(actual_intervals), std(actual_intervals)*1000);
+    fprintf('Mean scheduled interval: %.5f s (%.2f Hz)\n', ...
+        mean(scheduled_intervals), 1/mean(scheduled_intervals));
+    fprintf('Mean abs. timing error: %.5f ms (SD: %.5f ms)\n', ...
+        mean(abs(timing_error))*1000, std(timing_error)*1000);
 
-    % --- 1. Plot code sequences ---
+    nRows = 5; nCols = 2; sp = 1;
+
+    figure('Name','Image Flicker Diagnostics','NumberTitle','off');
+
+    % --- 1. Code sequences ---
+% --- 1. Code sequences actually used for modulation ---
     subplot(nRows, nCols, sp);
-    stairs(1:numel(codes{1}), codes{1}, 'r', 'LineWidth', 1.2);
+    stairs(1:numel(code_long_all{1}), code_long_all{1}, 'r', 'LineWidth', 1.2);
     ylim([-1.2 1.2]);
-    title('Left code sequence');
-    ylabel('Bit'); xlabel('Code bit');
-    grid on;
-    sp = sp + 1;
+    title('Left: modified code sequence');
+    ylabel('Code value'); xlabel('Frame'); grid on; sp = sp+1;
 
     subplot(nRows, nCols, sp);
-    stairs(1:numel(codes{2}), codes{2}, 'b', 'LineWidth', 1.2);
+    stairs(1:numel(code_long_all{2}), code_long_all{2}, 'b', 'LineWidth', 1.2);
     ylim([-1.2 1.2]);
-    title('Right code sequence');
-    ylabel('Bit'); xlabel('Code bit');
-    grid on;
-    sp = sp + 1;
+    title('Right: modified code sequence');
+    ylabel('Code value'); xlabel('Frame'); grid on; sp = sp+1;
 
-    % --- 2. Plot luminance modulations ---
-    subplot(nRows, nCols, sp);
+    % --- 2. Luminance time series ---
+    subplot(nRows,nCols,sp);
     plot(t, all_mod_lum(1,:), 'r', 'LineWidth', 1.2);
-    title('Left: Luminance Modulation');
-    xlabel('Time (s)'); ylabel('Lum.');
-    grid on;
-    sp = sp + 1;
+    title(sprintf('Left: Luminance (%.2f Hz)', carrierHzs(1)));
+    xlabel('Time (s)'); ylabel('Lum.'); grid on; sp = sp+1;
 
-    subplot(nRows, nCols, sp);
+    subplot(nRows,nCols,sp);
     plot(t, all_mod_lum(2,:), 'b', 'LineWidth', 1.2);
-    title('Right: Luminance Modulation');
-    xlabel('Time (s)'); ylabel('Lum.');
-    grid on;
-    sp = sp + 1;
+    title(sprintf('Right: Luminance (%.2f Hz)', carrierHzs(2)));
+    xlabel('Time (s)'); ylabel('Lum.'); grid on; sp = sp+1;
 
-    % --- 3. Plot autocorrelations ---
-    subplot(nRows, nCols, sp);
+    % --- 3. Autocorrelations ---
+    subplot(nRows,nCols,sp);
     [acfL, lagsL] = xcorr(mod_signals(1,:), 'coeff');
     plot(lagsL, acfL, 'r', 'LineWidth', 1.2);
     title('Left: Autocorrelation');
-    xlabel('Lag (frames)'); ylabel('Norm. corr');
-    grid on;
-    sp = sp + 1;
+    xlabel('Lag (frames)'); ylabel('Norm. corr'); grid on; sp = sp+1;
 
-    subplot(nRows, nCols, sp);
+    subplot(nRows,nCols,sp);
     [acfR, lagsR] = xcorr(mod_signals(2,:), 'coeff');
     plot(lagsR, acfR, 'b', 'LineWidth', 1.2);
     title('Right: Autocorrelation');
-    xlabel('Lag (frames)'); ylabel('Norm. corr');
-    grid on;
-    sp = sp + 1;
+    xlabel('Lag (frames)'); ylabel('Norm. corr'); grid on; sp = sp+1;
 
-    % --- 4. Plot cross-correlation (spans both columns) ---
-    subplot(nRows, nCols, sp:(nRows*nCols));
+    % --- 4. Cross-correlation (left col), Histogram of timing error (right col) ---
+    subplot(nRows,nCols,sp);
     [ccf, lagsC] = xcorr(mod_signals(1,:), mod_signals(2,:), 'coeff');
     plot(lagsC, ccf, 'k', 'LineWidth', 1.2);
-    title('Cross-correlation: Left vs Right');
-    xlabel('Lag (frames)'); ylabel('Norm. corr');
-    grid on;
+    title('Cross-corr: Left vs Right');
+    xlabel('Lag (frames)'); ylabel('Norm. corr'); grid on;
 
-    % --- Overall title ---
+    subplot(nRows,nCols,sp+1);
+    histogram(timing_error*1000, 30, 'FaceColor', [0.2 0.2 0.8]);
+    xlabel('Timing Error (ms)');
+    ylabel('Count');
+    title('Histogram of Timing Error');
+
+    % --- 5. 
+       % --- 5. Frame interval plot ---
+    subplot(nRows,nCols,nRows*nCols-1);
+    h1 = plot(actual_intervals*1000,'-o'); hold on;
+    h2 = plot(scheduled_intervals*1000,'--');
+    % Add horizontal line for IFI
+    h3 = yline(ifi*1000, 'k-', ...
+            'LabelVerticalAlignment','bottom','LabelHorizontalAlignment','left');
+    ylabel('Frame Interval (ms)');
+    legend([h1 h2 h3], {'Actual', 'Scheduled', sprintf('IFI = %.2f ms', ifi*1000)});
+    grid on;
+    title('Frame Intervals');
+
+    subplot(nRows,nCols,nRows*nCols);
+    plot(timing_error*1000,'-o');
+    ylabel('Timing Error (ms)'); xlabel('Frame #');
+    title('Flip - Scheduled Time'); grid on;
+
     sgtitle(['Image Flicker Diagnostics: ', flickerMode]);
 end
+
+function code_smooth = raised_cosine_smooth(code_long, ramp_len)
+    % code_long: vector of -1/1 (your upsampled code)
+    % ramp_len: number of frames to smooth at each transition
+    code_smooth = code_long;
+    N = numel(code_long);
+    w = 0.5 * (1 - cos(linspace(0, pi, ramp_len))); % rising edge
+    for i = 2:N
+        if code_long(i) ~= code_long(i-1)
+            if code_long(i) == 1  % rising edge: -1 to 1
+                code_smooth(i-ramp_len+1:i) = w;
+            else                 % falling edge: 1 to -1
+                code_smooth(i-ramp_len+1:i) = 1-w;
+                % code_smooth(i-ramp_len+1:i) = 2*code_smooth(i-ramp_len+1:i)-1; % map to [-1,1], BIPOLAR
+            end
+        end
+    end
+end
+
