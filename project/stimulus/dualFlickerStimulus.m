@@ -1,18 +1,17 @@
-"""
-@author: Radovan Vodila (radovan.vodila@ru.nl)
-"""
+% @author: Radovan Vodila (radovan.vodila@ru.nl)
+
 
 function flicker_protocol_two_images_hybrid
-    %% ---- USER OPTIONS ----
+    %% ---- PARAMETERS ----
     flickerMode = 'hybrid'; % 'freq', 'code', or 'hybrid'
-    maxDisplaySec = 10;
+    maxDisplaySec = 4;
     framesPerBit = 4;
     overlayAlpha = 128;
     lb_lum = 50; hb_lum = 195;
     stimSize = 400;
-    rel_xs = [0.4, 0.6]; rel_y = 0.5;
+    rel_xs = [0.30, 0.70]; rel_y = 0.5;
     carrierHzs = [5, 15];
-    imageFiles = {fullfile(pwd, 'project', 'stimulus', 'images', 'kakadu.png'), ...
+    imageFiles = {fullfile(pwd, 'project', 'stimulus', 'images', 'capybara.png'), ...
                   fullfile(pwd, 'project', 'stimulus', 'images', 'zebra2.png')};
     ramp_len = 4; % number of frames over which to smooth transitions
 
@@ -22,8 +21,6 @@ function flicker_protocol_two_images_hybrid
     code  = double(S.codes(1, :));
     code2 = double(S.codes(2, :));
     code  = code(:)'; code2 = code2(:)';
-
-
     %% ---- PSYCHTOOLBOX SETUP ----
     Screen('Preference', 'SkipSyncTests', 1);
     PsychDefaultSetup(2);
@@ -73,7 +70,7 @@ function flicker_protocol_two_images_hybrid
         nrep = ceil(totalFrames / numel(code_expanded));
         code_long = repmat(code_expanded, 1, nrep);
         code_long = code_long(1:totalFrames);
-        % code_long = 2 * code_long - 1; % bipolar
+        code_long = 2 * code_long - 1; % bipolar
 
         % --- Padding for smoothing at start
         pad_val = code_long(1);
@@ -119,7 +116,7 @@ function flicker_protocol_two_images_hybrid
                 Screen('FillRect', win, overlayColor, dstRects(:,k));
             end
 
-                targetTime = vbl + 0.5*ifi;      % What you asked for (scheduled time)
+                targetTime = vbl + 0.5*ifi;      % What we aske for (scheduled time)
                 vbl = Screen('Flip', win, targetTime);   % When the frame actually flipped
                 vbls(frameCount) = vbl;                 % Store actual flip time
                 targetVBLs(frameCount) = targetTime;    % Store target flip time
@@ -142,9 +139,6 @@ function flicker_protocol_two_images_hybrid
     %% ---- DIAGNOSTIC PLOTS ----
     % After the stimulus loop, call:
     plot_modulation_diagnostics(mod_signals, all_mod_lum, t, code_long_all, flickerMode, vbls, targetVBLs, carrierHzs, ifi);
-
-
-
 end
 
 function cleanup(win, textures)
@@ -158,7 +152,7 @@ end
 function plot_modulation_diagnostics(mod_signals, all_mod_lum, t, code_long_all, flickerMode, vbls, targetVBLs, carrierHzs, ifi)
     % --- Frame timing analysis ---
     actual_intervals = diff(vbls);         % Actual frame durations (s)
-    scheduled_intervals = diff(targetVBLs);% What you requested (s)
+    scheduled_intervals = diff(targetVBLs);% What we requested (s)
     timing_error = vbls - targetVBLs;      % Flip error (s)
 
     fprintf('\n=== Frame Timing Diagnostics ===\n');
@@ -174,7 +168,7 @@ function plot_modulation_diagnostics(mod_signals, all_mod_lum, t, code_long_all,
 
     figure('Name','Image Flicker Diagnostics','NumberTitle','off');
 
-    % --- 1. Code sequences ---
+    % --- Code sequences ---
 % --- 1. Code sequences actually used for modulation ---
     subplot(nRows, nCols, sp);
     stairs(1:numel(code_long_all{1}), code_long_all{1}, 'r', 'LineWidth', 1.2);
@@ -247,7 +241,7 @@ function plot_modulation_diagnostics(mod_signals, all_mod_lum, t, code_long_all,
 end
 
 function code_smooth = raised_cosine_smooth(code_long, ramp_len)
-    % code_long: vector of -1/1 (your upsampled code)
+    % code_long: vector of -1/1 (upsampled code)
     % ramp_len: number of frames to smooth at each transition
     code_smooth = code_long;
     N = numel(code_long);
