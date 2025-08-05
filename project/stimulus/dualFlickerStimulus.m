@@ -70,7 +70,6 @@ function flicker_protocol_two_images_hybrid
         nrep = ceil(totalFrames / numel(code_expanded));
         code_long = repmat(code_expanded, 1, nrep);
         code_long = code_long(1:totalFrames);
-        code_long = 2 * code_long - 1; % bipolar
 
         % --- Padding for smoothing at start
         pad_val = code_long(1);
@@ -79,6 +78,8 @@ function flicker_protocol_two_images_hybrid
         code_long = code_long_smoothed(ramp_len+1:end); % remove padding
         code_long_all{k} = code_long;
 
+        code_bipolar = 2 * code_long - 1; % bipolar
+
         % CARRIER
         carrier = 0.5 + 0.5 * sin(2*pi*carrierHzs(k)*t);
 
@@ -86,9 +87,9 @@ function flicker_protocol_two_images_hybrid
             case 'freq'
                 mod_signal = carrier;
             case 'code'
-                mod_signal = code_long;
+                mod_signal = code_long;                  % still [0,1], pure binary
             case 'hybrid'
-                mod_signal = carrier .* code_long;
+                mod_signal = carrier .* code_bipolar;    % now [-1,1], full contrast
             otherwise
                 error('Unknown flickerMode: %s', flickerMode);
         end

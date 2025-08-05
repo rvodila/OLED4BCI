@@ -1,17 +1,19 @@
-"""
-@author: Radovan Vodila (radovan.vodila@ru.nl)
-"""
+% @author: Radovan Vodila (radovan.vodila@ru.nl)
+
 
 function flicker_protocol_video_hybrid
 
-    %% ---- USER OPTIONS ----
+    %% ---- PARAMETERS ----
     flickerMode = 'hybrid'; % 'freq', 'code', or 'hybrid'
     overlayAlpha = 128;
-    lb_lum = 0; hb_lum = 255;
-    framesPerBit = 2;
-    carrierHzs = [5, 1];
-    maxDisplaySec = 10;
-    ramp_len = 2;  % For raised cosine smoothing
+    lb_lum = 60; hb_lum = 200;
+    framesPerBit = 1;
+    carrierHzs = [3, 1];
+    maxDisplaySec = 5;
+    ramp_len = 2;  % param for raised cosine smoothing
+    % Stimulus
+    rectW = 300; rectH = 150;
+    rel_xs = [0.4, 0.6]; rel_ys = [0.3, 0.8];
 
     % --- Video file ---
     movieFile = fullfile(pwd, 'project', 'stimulus', 'images', 'ape_walk.mp4');
@@ -45,21 +47,21 @@ function flicker_protocol_video_hybrid
     code_long_all = cell(1, nOverlays);
 
     for k = 1:nOverlays
-        cur_code = codes{k};
+        cur_code = codes{k};                              % binary [0,1]
         code_expanded = repelem(cur_code, framesPerBit);
         nrep = ceil(totalFrames / numel(code_expanded));
         code_long = repmat(code_expanded, 1, nrep);
         code_long = code_long(1:totalFrames);
 
-        % --- Raised cosine smoothing (with padding for edges)
+        % --- Raised cosine smoothing (for binary, i.e. [0,1])
         pad_val = code_long(1);
         code_long_padded = [repmat(pad_val, 1, ramp_len) code_long];
         code_long_smoothed = raised_cosine_smooth(code_long_padded, ramp_len);
         code_long = code_long_smoothed(ramp_len+1:end); % remove padding
-        code_long_all{k} = code_long;
+        code_long_all{k} = code_long;                    % store *binary* smoothed code
 
-        % --- Bipolar mapping only for Gold code if needed ---
-        code_bipolar = 2*code_long - 1;
+        % --- Conversion to bipolar ONLY for modulation
+        code_bipolar = 2*code_long - 1;                  % bipolar: [-1,1]
 
         carrier = 0.5 + 0.5 * sin(2*pi*carrierHzs(k)*t);
 
@@ -67,9 +69,9 @@ function flicker_protocol_video_hybrid
             case 'freq'
                 mod_signal = carrier;
             case 'code'
-                mod_signal = code_long;
+                mod_signal = code_long;                  % still [0,1], pure binary
             case 'hybrid'
-                mod_signal = carrier .* code_bipolar;
+                mod_signal = carrier .* code_bipolar;    % now [-1,1], full contrast
             otherwise
                 error('Unknown flickerMode: %s', flickerMode);
         end
@@ -80,8 +82,6 @@ function flicker_protocol_video_hybrid
 
     %% ---- VIDEO STIMULUS LOOP ----
     movie = Screen('OpenMovie', win, movieFile);
-    rectW = 500; rectH = 300;
-    rel_xs = [0.4, 0.6]; rel_ys = [0.3, 0.8];
     Screen('PlayMovie', movie, 1);
     vbl = Screen('Flip', win);
     frameCount = 0;
@@ -99,7 +99,7 @@ function flicker_protocol_video_hybrid
             end
             frameCount = frameCount + 1;
 
-            % On first frame, get video size (fast method)
+            % On first frame, get video size
             if isempty(dstRect)
                 rect = Screen('Rect', tex);
                 vidW = rect(3) - rect(1);
