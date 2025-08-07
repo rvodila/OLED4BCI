@@ -4,7 +4,7 @@
 function flicker_protocol_two_images_hybrid
     %% ---- PARAMETERS ----
     flickerMode = 'hybrid'; % 'freq', 'code', or 'hybrid'
-    maxDisplaySec = 4;
+    maxDisplaySec = 10;
     framesPerBit = 4;
     overlayAlpha = 128;
     lb_lum = 50; hb_lum = 195;
@@ -117,7 +117,7 @@ function flicker_protocol_two_images_hybrid
                 Screen('FillRect', win, overlayColor, dstRects(:,k));
             end
 
-                targetTime = vbl + 0.5*ifi;      % What we aske for (scheduled time)
+                targetTime = vbl + ifi;      % What we aske for (scheduled time)
                 vbl = Screen('Flip', win, targetTime);   % When the frame actually flipped
                 vbls(frameCount) = vbl;                 % Store actual flip time
                 targetVBLs(frameCount) = targetTime;    % Store target flip time
@@ -198,12 +198,14 @@ function plot_modulation_diagnostics(mod_signals, all_mod_lum, t, code_long_all,
     subplot(nRows,nCols,sp);
     [acfL, lagsL] = xcorr(mod_signals(1,:), 'coeff');
     plot(lagsL, acfL, 'r', 'LineWidth', 1.2);
+    ylim([0 1]);
     title('Left: Autocorrelation');
     xlabel('Lag (frames)'); ylabel('Norm. corr'); grid on; sp = sp+1;
 
     subplot(nRows,nCols,sp);
     [acfR, lagsR] = xcorr(mod_signals(2,:), 'coeff');
     plot(lagsR, acfR, 'b', 'LineWidth', 1.2);
+    ylim([0 1]);
     title('Right: Autocorrelation');
     xlabel('Lag (frames)'); ylabel('Norm. corr'); grid on; sp = sp+1;
 
@@ -211,6 +213,7 @@ function plot_modulation_diagnostics(mod_signals, all_mod_lum, t, code_long_all,
     subplot(nRows,nCols,sp);
     [ccf, lagsC] = xcorr(mod_signals(1,:), mod_signals(2,:), 'coeff');
     plot(lagsC, ccf, 'k', 'LineWidth', 1.2);
+    ylim([0 1]);
     title('Cross-corr: Left vs Right');
     xlabel('Lag (frames)'); ylabel('Norm. corr'); grid on;
 
