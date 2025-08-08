@@ -7,12 +7,12 @@ function flicker_protocol_video_hybrid
     lb_lum = 60; hb_lum = 200;
     framesPerBit = 1;
     carrierHzs = [3, 1];
-    maxDisplayLen = 20;
+    maxDisplayLen = 10;
     ramp_len = 2;  % for raised cosine smoothing
     rectW = 300; rectH = 150;
     rel_xs = [0.4, 0.6]; rel_ys = [0.3, 0.8];
     movieFile = fullfile(pwd, 'project', 'stimulus', 'images', 'ape_walk.mp4'); % 25hz, 17sec, 950 x 540
-    codefile = fullfile(pwd, 'project', 'stimulus', 'files', 'mgold_61_6521.mat');
+    codefile = fullfile(pwd, 'project', 'stimulus', 'codes', 'mgold_61_6521.mat');
     S = load(codefile);
     code  = double(S.codes(1, :)); code2 = double(S.codes(2, :));
     code  = code(:)'; code2 = code2(:)';
@@ -30,7 +30,7 @@ function flicker_protocol_video_hybrid
     ifi = Screen('GetFlipInterval', win);
     totalFrames = max(round(maxDisplayLen / ifi), 1);
     t = linspace(0, maxDisplayLen, totalFrames);
-
+    
     %% ---- PRECOMPUTE MODULATION ----
     nOverlays = 2;
     all_mod_lum = zeros(nOverlays, totalFrames);
@@ -81,10 +81,24 @@ function flicker_protocol_video_hybrid
     ifi = Screen('GetFlipInterval', win);
     displayFPS = 1/ifi;
 
-    % --- DURATION AND FRAME MAPPING ---
-    maxDisplaySec = min(maxDisplayLen, videoDuration);  % or less, if you want to stop early
-    totalFrames = round(maxDisplaySec * displayFPS);
-    videoFrameIdx = round( linspace(1, nVidFrames, totalFrames) );
+    % How many video frames fit in the allotted display time?
+    nDisplayableFrames = min(round(videoFPS * maxDisplayLen), nVidFrames);
+
+    % Corresponding display duration
+    actualDisplayLen = nDisplayableFrames / videoFPS;
+
+    % Compute number of screen refreshes we will use (best: sync to video FPS)
+    % You can either show each video frame for N display frames, or show at real time
+
+    % If you want to match video timing (recommended):
+    videoFrameTimes = (0:nDisplayableFrames-1) / videoFPS; % seconds
+
+    % For each display frame (at your display FPS), find which video frame to show
+    displayTimes = (0:round(actualDisplayLen*displayFPS)-1) / displayFPS;
+
+    % For each display frame, which video frame to show?
+    videoFrameIdx = interp1(videoFrameTimes, 1:nDisplayableFrames, displayTimes, 'nearest', 'extrap');
+    videoFrameIdx = min(max(round(videoFrameIdx),1),nVidFrames); % safety
 
     % --- LOAD VIDEO TO TEXTURES
     videoFrames = cell(1, nVidFrames);
@@ -127,6 +141,9 @@ function flicker_protocol_video_hybrid
     try
         for frameCount = 1:totalFrames
             vidIdx = videoFrameIdx(frameCount);
+            if vidIdx > nVidFrames
+                break;
+            end 
             tex = videoTextures(vidIdx);
             Screen('DrawTexture', win, tex, [], dstRect);
 
@@ -203,12 +220,12 @@ function plot_modulation_diagnostics(mod_signals, all_mod_lum, t, code_long_all,
 
     subplot(nRows, nCols, sp);
     plot(t, all_mod_lum(1,:), 'r', 'LineWidth', 1.2);
-    title(sprintf('Left: Luminance (%.2f Hz)', carrierHzs(1)));
+    title(sprintf('Left: Modulated luminance (%.2f Hz)', carrierHzs(1)));
     xlabel('Time (s)'); ylabel('Lum.'); grid on; sp = sp+1;
 
     subplot(nRows, nCols, sp);
     plot(t, all_mod_lum(2,:), 'b', 'LineWidth', 1.2);
-    title(sprintf('Right: Luminance (%.2f Hz)', carrierHzs(2)));
+    title(sprintf('Right: Modulated Luminance (%.2f Hz)', carrierHzs(2)));
     xlabel('Time (s)'); ylabel('Lum.'); grid on; sp = sp+1;
 
     subplot(nRows, nCols, sp);
