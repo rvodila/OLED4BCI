@@ -3,12 +3,12 @@ function flicker_protocol_two_images_hybrid
     %% ---- PARAMETERS ----
     devModeSkipSync = true;                % set false for real experiments
     flickerModeDefault = 'hybrid';         % freq, code, hybrid
-    maxDisplaySec = 10;
+    maxDisplaySec = 120;
     framesPerBit = 1;
     overlayAlphaDefault = 128;
     lb_lum = 50; hb_lum = 195;
-    stimSize = 200;
-    carrierHzs = [2, 1];
+    stimSize = 400;
+    carrierHzs = [6, 12];
     imageFiles = {fullfile(pwd, 'project', 'stimulus', 'images', 'capybara.png'), ...
                   fullfile(pwd, 'project', 'stimulus', 'images', 'zebra2.png') ...
                   };
@@ -21,18 +21,18 @@ function flicker_protocol_two_images_hybrid
     code  = code(:)';            code2 = code2(:)';
 
     %% ---- DEFINE AREAS ----
-    % MAKEAREA  Create a struct defining a modulated overlay area.
-    % Fields (optional; defaults in parentheses):
-    %   attachStim   Index of base image to overlay (1).
-    %   rel_x,rel_y  Center position within base image, fraction 0–1 (0.5,0.5).
-    %   w,h          Width/height in pixels (200,200).
-    %   alpha        Transparency 0–255 (128).
-    %   lb,hb        Min/max luminance (60,200).
-    %   flickerMode  'freq' (sine), 'code' (binary), 'hybrid' (sine×code) ('hybrid').
-    %   carrierHz    Carrier frequency in Hz (3).
-    %   code         0/1 vector for 'code'/'hybrid'; unused for 'freq' ([]).
-    %   framesPerBit Frames per code bit (1).
-    %   ramp_len     Frames for raised-cosine smoothing at transitions (2).
+    % INPUT (struct fields in 'args')
+    %   attachStim    (int)    : 1..nStim; index of the base image this overlay attaches to.
+    %   rel_x, rel_y  (0..1)   : fractional position inside the attached image rect
+    %                            (0=left/top, 0.5=center, 1=right/bottom).
+    %   w, h          (px)     : overlay rectangle size.
+    %   alpha         (0..255) : overlay opacity used for alpha blending.
+    %   lb, hb        (0..255) : luminance bounds; map01 → [lb, hb].
+    %   flickerMode   (char)   : 'freq' | 'code' | 'hybrid'.
+    %   carrierHz     (Hz)     : sine carrier frequency (used in 'freq'/'hybrid').
+    %   code          (0/1 vec): binary code (used in 'code'/'hybrid'); expanded to frames.
+    %   framesPerBit  (int≥1)  : frames per code bit.
+    %   ramp_len      (int≥0)  : raised-cosine smoothing length at code transitions (frames).
 
     areas = [ ...
         makeArea(struct('attachStim',1,'rel_x',0.5,'rel_y',0.5,'w',stimSize,'h',stimSize, ...
@@ -47,15 +47,22 @@ function flicker_protocol_two_images_hybrid
     nAreas = numel(areas);
 
     %% ---- PSYCHTOOLBOX SETUP ----
-    if devModeSkipSync, Screen('Preference','SkipSyncTests',1); end
+    if devModeSkipSync
+        Screen('Preference','SkipSyncTests', 1);  % dev: skip
+    else
+        Screen('Preference','SkipSyncTests', 0);  % real runs: enforce
+    end 
+
     PsychDefaultSetup(2); KbName('UnifyKeyNames');
     screens = Screen('Screens'); screenNumber = max(screens);
     bgColor = [255 255 255];
     [win, winRect] = Screen('OpenWindow', screenNumber, bgColor);
-    Screen('PreloadTextures', win);
+    
+    % Alpha blending mixes a new pixel (the source) with what’s already drawn (the destination) using an opacity α in [0,1]
     Screen('BlendFunction', win, 'GL_SRC_ALPHA', 'GL_ONE_MINUS_SRC_ALPHA');
     HideCursor;
-    ifi = Screen('GetFlipInterval', win); displayFPS = 1/ifi;
+    ifi = Screen('GetFlipInterval', win); 
+    displayFPS = 1/ifi;
 
     %% ---- LOAD & PLACE IMAGES ----
     nStim = numel(imageFiles);
@@ -75,11 +82,13 @@ function flicker_protocol_two_images_hybrid
         colStart = floor((sz(2)-minDim)/2)+1;
         imgSq = img(rowStart:rowStart+minDim-1, colStart:colStart+minDim-1, :);
         imgSq = imresize(imgSq, [stimSize stimSize]);
-        imgSq = im2uint8(mat2gray(imgSq));
+        imgSq = im2uint8(mat2gray(imgSq));  % keep identical behavior
         textures(k) = Screen('MakeTexture', win, imgSq);
         cx = winW * rel_xs(k); cy = winH * rel_y;
         dstRects(:,k) = CenterRectOnPointd([0 0 stimSize stimSize], cx, cy);
     end
+    % Preload after textures exist
+    Screen('PreloadTextures', win);
 
     %% ---- TIMEBASE ----
     totalFrames = max(round(maxDisplaySec / ifi), 1);
@@ -89,69 +98,100 @@ function flicker_protocol_two_images_hybrid
     [areas, mod_signals, all_mod_lum, code_long_all] = precompute_area_modulations(areas, t);
 
     %% ---- PRECOMPUTE OVERLAY RECTS (BY AREA) ----
-    overlayRects = compute_overlay_rects_for_images(areas, dstRects);
-    % Build a lookup: for each stim k, list of area indices attached to it
-    areasByStim = cell(1, nStim);
-    for a = 1:numel(areas)
-        s = max(1, min(nStim, areas(a).attachStim));
-        areasByStim{s}(end+1) = a; 
-    end
+    overlayRects = compute_overlay_rects_for_images(areas, dstRects);  % asserts inside
 
-    %% ---- STIMULUS LOOP ----
+    %% ---- STIMULUS LOOP (optimized, VBL-locked) ----
+    Priority(MaxPriority(win));
+
+    % Prime pipeline: first flip may return immediately, second settles timing
+    Screen('Flip', win);
     vbl = Screen('Flip', win);
-    waitframes = 1
-    vbls = zeros(1, totalFrames);
-    targetVBLs = zeros(1, totalFrames);
+
+    vbls       = zeros(1, totalFrames);
+    targetVBLs = nan(1, totalFrames);     % purely diagnostic (theoretical)
+    alphas     = double([areas.alpha]);    % 1 x nAreas, cached
+    colors     = zeros(4, numel(areas));   % preallocate 4 x nAreas
 
     try
         for frameCount = 1:totalFrames
             % Draw base images
-            Screen('FillRect', win, bgColor);
-            for k = 1:nStim
-                Screen('DrawTexture', win, textures(k), [], dstRects(:,k));
-            end
+            Screen('FillRect', win, bgColor);               % cheap clear
+            Screen('DrawTextures', win, textures, [], dstRects);
 
-            % Draw overlays from modular areas
-            for a = 1:nAreas
-                overlayLum = uint8(max(0, min(255, round(all_mod_lum(a, frameCount)))));
-                Screen('FillRect', win, [overlayLum overlayLum overlayLum areas(a).alpha], overlayRects(:,a));
-            end
+            % Draw overlays (batched) without re-allocating matrices
+            lumRow = all_mod_lum(:, frameCount).';
+            colors(1:3,:) = repmat(lumRow,3,1);
+            colors(4,:)   = alphas;
 
-            targetTime = vbl + (waitframes - 0.5)*ifi;
-            vbl = Screen('Flip', win, targetTime);
+            Screen('FillRect', win, colors, overlayRects);
 
-            vbls(frameCount) = vbl; targetVBLs(frameCount) = targetTime;
+            % Flip (block on next VBL; keeps pipeline busy)
+            vblPrev = vbl;
+            vbl = Screen('Flip', win);
 
+            % Log actual and theoretical (for plots only)
+            vbls(frameCount)       = vbl;
+            targetVBLs(frameCount) = vblPrev + ifi;         % diagnostics, not used for scheduling
+
+            % Lightweight exit check (optional: throttle to every few frames)
             [keyIsDown, ~, keyCode] = KbCheck;
             if keyIsDown && keyCode(KbName('ESCAPE')), break; end
         end
     catch ME
         cleanup(win, textures);
-        rethrow(ME);
         Priority(0);
-
+        rethrow(ME);
     end
     cleanup(win, textures);
     Priority(0);
+
     %% ---- DIAGNOSTICS ----
+    flickerModes = string({areas.flickerMode});
     plot_modulation_diagnostics_img(mod_signals, all_mod_lum, t, code_long_all, ...
-        [areas.flickerMode], vbls, targetVBLs, [areas.carrierHz], ifi, areas);
+        flickerModes, vbls, targetVBLs, [areas.carrierHz], ifi, areas);
 end
 
 %% ---------- HELPERS ----------
 function area = makeArea(args)
-% MAKEAREA  Define a modulated overlay area for image presentation.
-% AREA = MAKEAREA(ARGS) with fields (optional; defaults apply):
-%   attachStim   Index of base image this area overlays (1..nStim).
-%   rel_x,rel_y  Center position as fraction of that image rect (0–1).
-%   w,h          Width/height in pixels.
-%   alpha        Fill transparency (0=transparent, 255=opaque).
-%   lb,hb        Min/max luminance (0–255).
-%   flickerMode  'freq' (sine), 'code' (binary), 'hybrid' (sine×code).
-%   carrierHz    Carrier frequency in Hz.
-%   code         0/1 vector for 'code'/'hybrid'; ignored for 'freq'.
-%   framesPerBit Frames per code bit.
-%   ramp_len     Frames for raised-cosine smoothing at code transitions.
+% ARGUMENTS
+% attachStim   : integer 1..nStim
+%     Index of the base image this overlay attaches to (into textures/dstRects).
+%
+% rel_x, rel_y : scalar in [0,1]
+%     Position INSIDE the attached image rect, fractional coords (0=left/top,
+%     0.5=center, 1=right/bottom). Used as the overlay rect’s anchor point.
+%
+% w, h         : pixels
+%     Overlay rectangle width/height drawn over the image (modulated patch).
+%
+% alpha        : 0..255
+%     Overlay opacity used by alpha blending (0=transparent, 255=opaque).
+%
+% lb, hb       : 0..255
+%     Lower/upper luminance bounds. The per-frame modulation is mapped into
+%     this range: L = lb + (hb - lb) * map01, where map01 ∈ [0,1].
+%
+% flickerMode  : 'freq' | 'code' | 'hybrid'
+%     'freq'   : sinusoidal carrier only (map01 = carrier in [0,1]).
+%     'code'   : binary code only (map01 = code in [0,1]).
+%     'hybrid' : carrier .* bipolar(code) in [-1,1], then map to [0,1] via
+%                (x+1)/2 before lb/hb mapping (preserves full contrast).
+%
+% carrierHz    : Hz (≥0)
+%     Sine frequency for 'freq' and 'hybrid' modes.
+%
+% code         : row/vector of 0/1
+%     Binary sequence for 'code' and 'hybrid'. Expanded to frames by
+%     framesPerBit and tiled to the full duration.
+%
+% framesPerBit : integer ≥1
+%     Number of video frames per code bit. Bit rate = refreshHz / framesPerBit.
+%     Increase to give more timing headroom on heavy scenes.
+%
+% ramp_len     : frames ≥0
+%     Raised-cosine smoothing length applied at 0↔1 transitions of the code.
+%     Reduces transients and missed deadlines at sharp edges.
+
 defaults = struct('attachStim',1,'rel_x',0.5,'rel_y',0.5, ...
                   'w',200,'h',200,'alpha',128,'lb',60,'hb',200, ...
                   'flickerMode','hybrid','carrierHz',3,'code',[], ...
@@ -212,8 +252,12 @@ function overlayRects = compute_overlay_rects_for_images(areas, dstRects)
 % Rect per area, positioned relative to its attached base image rect.
 n = numel(areas);
 overlayRects = zeros(4,n);
+nStim = size(dstRects,2);
 for k = 1:n
-  s = max(1, min(size(dstRects,2), areas(k).attachStim)); % clamp index
+  assert(areas(k).attachStim>=1 && areas(k).attachStim<=nStim, ...
+      'Area %d attachStim=%d is out of range for %d images.', ...
+      k, areas(k).attachStim, nStim);
+  s = areas(k).attachStim;
   r = dstRects(:,s);  % [left top right bottom] of the base image
   w = r(3)-r(1); h = r(4)-r(2);
   cx = r(1) + areas(k).rel_x * w;
@@ -260,7 +304,7 @@ end
 for k = 1:nAreas
     nexttile;
     plot(t, all_mod_lum(k,:), 'LineWidth', 1.1);
-    fm = string(flickerModeList(min(k,numel(flickerModeList))));
+    fm = flickerModeList(min(k,numel(flickerModeList)));
     chz = carrierHzs(min(k,numel(carrierHzs)));
     title(sprintf('Area %d: lum (%s, %.2f Hz)',k,fm, chz));
     grid on; xlabel('Time (s)'); ylabel('Lum');
@@ -295,7 +339,13 @@ plot(timing_error*1000,'-o');
 xlabel('Frame #'); ylabel('Timing error (ms)');
 title('Flip timing error over time'); grid on;
 
-title(tl, sprintf('Diagnostics | nAreas=%d', nAreas));
+nomHz = 1/ifi;
+d = diff(vbls);
+effHz = 1/mean(d);
+jitter_ms = std(d)*1000;
+
+title(tl, sprintf('Diagnostics | nAreas=%d | Nominal=%.2f Hz | Achieved=%.2f Hz | Jitter=%.2f ms', ...
+                  nAreas, nomHz, effHz, jitter_ms));
 end
 
 

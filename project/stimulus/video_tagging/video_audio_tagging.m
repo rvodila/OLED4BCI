@@ -7,8 +7,8 @@ function flicker_protocol_video_hybrid
     overlayAlphaDefault = 128;
     lb_lum = 60; hb_lum = 200;
     framesPerBit = 1;
-    carrierHzs = [3, 1, 10];          % used in example areas below
-    maxDisplayLen = 5;            % seconds (max playback duration)
+    carrierHzs = [3, 4];          % used in example areas below
+    maxDisplayLen = 150;            % seconds (max playback duration)
     ramp_len = 4;                 % for raised cosine smoothing
     rectW = 300; rectH = 150;     % default area size
     movieFile = fullfile(pwd, 'project', 'stimulus', 'images', 'ape_walk.mp4'); % 25Hz, 17s, 950x540
@@ -54,9 +54,14 @@ function flicker_protocol_video_hybrid
     nChannels = size(audioData,2);
 
     %% ---- PSYCHTOOLBOX SETUP ----
-    if devModeSkipSync, Screen('Preference','SkipSyncTests',1); end
+    if devModeSkipSync
+      Screen('Preference','SkipSyncTests', 1);  % DEV: skip
+    else
+      Screen('Preference','SkipSyncTests', 0);  % EXPERIMENT: enforce
+    end
     PsychDefaultSetup(2);
     KbName('UnifyKeyNames');
+
 
     screens = Screen('Screens');
     screenNumber = max(screens);
@@ -132,48 +137,60 @@ function flicker_protocol_video_hybrid
     PsychPortAudio('FillBuffer', pahandle, audioData'); % buffer must be [channels x samples]
 
     %% ---- VIDEO STIMULUS LOOP ----
-    vbls = zeros(1, totalFrames);
-    targetVBLs = zeros(1, totalFrames);
+    vbls       = zeros(1, totalFrames);
+    targetVBLs = nan(1, totalFrames);   % diagnostics only
 
     try
-        % Align audio onset with first stimulus flip
-        vbl = Screen('Flip', win); % establish VBL time baseline
-        PsychPortAudio('Start', pahandle, 1, vbl + 0.5*ifi, 1);
+        % Prime to real VBL cadence
+        Screen('Flip', win);                  % first may return immediately
+        vbl = Screen('Flip', win);            % aligned to VBL
+
+        % Start audio at the NEXT VBL to phase-lock A/V
+        PsychPortAudio('Start', pahandle, 1, vbl + ifi, 1);
+
+        % Prealloc overlay colors
+        alphas = double([areas.alpha]);       % 1 x nAreas
+        colors = zeros(4, nAreas);            % 4 x nAreas
 
         for frameCount = 1:totalFrames
-            vidIdx = videoFrameIdx(frameCount);
-            tex = videoTextures(vidIdx);  % already built
+            % Clear background (if video doesn't cover full screen)
+            Screen('FillRect', win, bgColor);
 
-            % Draw video
+            % Draw video frame
+            vidIdx = videoFrameIdx(frameCount);
+            tex    = videoTextures(vidIdx);
             Screen('DrawTexture', win, tex, [], dstRect);
 
-            % Draw overlays for all areas
-            for k = 1:nAreas
-                overlayLum = uint8(max(0, min(255, round(all_mod_lum(k, frameCount)))));
-                Screen('FillRect', win, [overlayLum overlayLum overlayLum areas(k).alpha], overlayRects(:,k));
-            end
+            % Batch overlays
+            lumRow = all_mod_lum(:, frameCount).';
+            colors(1:3,:) = repmat(lumRow,3,1);
+            colors(4,:)   = alphas;
+            Screen('FillRect', win, colors, overlayRects);
 
-            % Flip on schedule (don't be late)
-            targetTime = vbl + 0.5*ifi;
-            vbl        = Screen('Flip', win, targetTime);
-            vbls(frameCount)      = vbl;
-            targetVBLs(frameCount)= targetTime;
+            % (Optional) signal end-of-draws
+            % Screen('DrawingFinished', win, 0);
 
-            % ESC to abort
+            % Flip at next VBL (unscheduled)
+            vblPrev = vbl;
+            vbl     = Screen('Flip', win);
+
+            % Log actual & theoretical (for plots only)
+            vbls(frameCount)       = vbl;
+            targetVBLs(frameCount) = vblPrev + ifi;
+
+            % ESC to abort (optional: throttle)
             [keyIsDown, ~, keyCode] = KbCheck;
-            if keyIsDown && keyCode(KbName('ESCAPE'))
-                break;
-            end
+            if keyIsDown && keyCode(KbName('ESCAPE')), break; end
         end
 
     catch ME
-        % Ensure cleanup before rethrow
         cleanup_all();
         rethrow(ME);
     end
 
     % Normal cleanup
     cleanup_all();
+
 
     %% ---- DIAGNOSTICS ----
     plot_modulation_diagnostics(mod_signals, all_mod_lum, t, code_long_all, ...
@@ -288,66 +305,125 @@ function cleanUpVideo(win)
     sca;
 end
 
-function plot_modulation_diagnostics(mod_signals, all_mod_lum, t, code_long_all, flickerMode, vbls, targetVBLs, carrierHzs, ifi, areas)
+function plot_modulation_diagnostics(mod_signals, all_mod_lum, t, code_long_all, ~, vbls, targetVBLs, carrierHzs, ifi, areas)
+% Aligned with static-image diagnostics: same figures & metrics.
+
 nAreas = size(mod_signals,1);
-actual_intervals   = diff(vbls);
-scheduled_intervals= diff(targetVBLs);
-timing_error       = vbls - targetVBLs;
+flickerModeList = string({areas.flickerMode});
+
+% --- Timing vectors (handle NaNs for targetVBLs gracefully) ---
+actual_intervals    = diff(vbls);                         % s
+scheduled_intervals = diff(targetVBLs);                   % s (may contain NaNs)
+timing_error_full   = vbls - targetVBLs;                  % s (may contain NaNs)
+valid_te            = isfinite(timing_error_full);
+timing_error_valid  = timing_error_full(valid_te);        % s
+
+% --- Summary stats ---
+nomHz     = 1/ifi;
+effHz     = 1/mean(actual_intervals);
+jitter_ms = std(actual_intervals)*1000;
+drops     = sum(actual_intervals > 1.5*ifi);
+mean_sched_int = mean(scheduled_intervals(isfinite(scheduled_intervals)));
+schedHz   = 1/mean_sched_int;
 
 fprintf('\n=== Frame Timing Diagnostics ===\n');
+fprintf('Flicker modes & carriers:\n');
+for k = 1:nAreas
+    chz = carrierHzs(min(k, numel(carrierHzs)));
+    fprintf('  Area %d: mode=%s, carrier=%.3f Hz\n', k, flickerModeList(k), chz);
+end
 fprintf('Mean actual interval: %.5f s (%.2f Hz), SD: %.5f ms\n', ...
-    mean(actual_intervals), 1/mean(actual_intervals), std(actual_intervals)*1000);
-fprintf('Mean scheduled interval: %.5f s (%.2f Hz)\n', ...
-    mean(scheduled_intervals), 1/mean(scheduled_intervals));
-fprintf('Mean abs. timing error: %.5f ms (SD: %.5f ms)\n', ...
-    mean(abs(timing_error))*1000, std(timing_error)*1000);
+    mean(actual_intervals), effHz, std(actual_intervals)*1000);
+if isfinite(mean_sched_int)
+    fprintf('Mean scheduled interval: %.5f s (%.2f Hz)\n', mean_sched_int, schedHz);
+else
+    fprintf('Mean scheduled interval: n/a (no finite targets)\n');
+end
+if ~isempty(timing_error_valid)
+    fprintf('Mean abs. timing error: %.5f ms (SD: %.5f ms)\n', ...
+        mean(abs(timing_error_valid))*1000, std(timing_error_valid)*1000);
+else
+    fprintf('Mean abs. timing error: n/a (no finite targets)\n');
+end
+fprintf('Drops (>1.5×IFI): %d\n', drops);
 
-figure('Name','Video Flicker Diagnostics','NumberTitle','off');
-tl = tiledlayout(4, max(2,nAreas), 'TileSpacing','compact');
+% --- Figure layout (aligned to static diagnostics) ---
+figure('Name','Flicker Diagnostics','NumberTitle','off');
+nCols = max(2, nAreas);
+tl = tiledlayout(5, nCols, 'TileSpacing','compact');
 
-% Row 1: code sequences (if any)
+% Row 1: code sequences
 for k = 1:nAreas
-  nexttile;
-  if ~isempty(code_long_all{k})
-    stairs(1:numel(code_long_all{k}), code_long_all{k}, 'LineWidth', 1.1);
-    ylim([-0.2 1.2]); title(sprintf('Area %d: code',k));
-  else
-    plot(nan); title(sprintf('Area %d: code (none)',k)); ylim([0 1]);
-  end
-  grid on; xlabel('Frame'); ylabel('Code');
+    nexttile;
+    if ~isempty(code_long_all{k})
+        stairs(1:numel(code_long_all{k}), code_long_all{k}, 'LineWidth', 1.1);
+        ylim([-0.2 1.2]); ylabel('Code'); xlabel('Frame');
+        title(sprintf('Area %d: code', k));
+    else
+        plot(nan); ylim([0 1]); ylabel('Code'); xlabel('Frame');
+        title(sprintf('Area %d: code (none)', k));
+    end
+    grid on;
 end
 
-% Row 2: luminance over time
+% Row 2: luminance time series
 for k = 1:nAreas
-  nexttile;
-  plot(t, all_mod_lum(k,:), 'LineWidth', 1.1);
-  title(sprintf('Area %d: luminance (carrier=%.2f Hz)', k, carrierHzs(min(k,numel(carrierHzs)))));
-  grid on; xlabel('Time (s)'); ylabel('Lum.');
+    nexttile;
+    plot(t, all_mod_lum(k,:), 'LineWidth', 1.1); grid on;
+    fm = flickerModeList(k);
+    chz = carrierHzs(min(k, numel(carrierHzs)));
+    title(sprintf('Area %d: lum (%s, %.2f Hz)', k, fm, chz));
+    xlabel('Time (s)'); ylabel('Lum.');
 end
 
-% Row 3: autocorr per area
+% Row 3: autocorrelation per area
 for k = 1:nAreas
-  nexttile;
-  [acf, lags] = xcorr(mod_signals(k,:), 'coeff');
-  plot(lags, acf, 'LineWidth',1.1); ylim([0 1]);
-  title(sprintf('Area %d: autocorr',k)); grid on; xlabel('Lag (frames)'); ylabel('Norm. corr');
+    nexttile;
+    [acf, lags] = xcorr(mod_signals(k,:), 'coeff');
+    plot(lags, acf, 'LineWidth', 1.1); grid on; ylim([0 1]);
+    title(sprintf('Area %d: autocorr', k));
+    xlabel('Lag (frames)'); ylabel('Norm. corr');
 end
 
-% Row 4: timing diagnostics
-nexttile([1 max(1,ceil(nAreas/2))]);
-histogram(timing_error*1000, 30);
-xlabel('Timing Error (ms)'); ylabel('Count'); title('Flip timing error'); grid on;
+% Row 4: Cross-corr (col 1) + Timing-error histogram (col 2..end)
+nexttile;
+if nAreas >= 2
+    [ccf, lagsC] = xcorr(mod_signals(1,:), mod_signals(2,:), 'coeff');
+    plot(lagsC, ccf, 'LineWidth', 1.1); grid on;
+    title('Cross-corr: Area 1 vs Area 2');
+    xlabel('Lag (frames)'); ylabel('Norm. corr');
+else
+    plot(nan); grid on; title('Cross-corr (needs ≥2 areas)');
+end
 
-nexttile([1 max(1,floor(nAreas/2))]);
+nexttile([1, nCols-1]);
+if ~isempty(timing_error_valid)
+    histogram(timing_error_valid*1000, 30);
+else
+    histogram(0);  % placeholder
+end
+grid on; xlabel('Timing Error (ms)'); ylabel('Count');
+title('Histogram of Timing Error');
+
+% Row 5: Frame intervals (col 1..end-1) + Flip error over time (last col)
+nexttile([1, max(1, nCols-1)]);
 h1 = plot(actual_intervals*1000,'-o'); hold on;
 h2 = plot(scheduled_intervals*1000,'--');
 h3 = yline(ifi*1000, 'k-');
-ylabel('Frame Interval (ms)');
+grid on; ylabel('Frame Interval (ms)');
 legend([h1 h2 h3], {'Actual','Scheduled',sprintf('IFI=%.2f ms',ifi*1000)}, 'Location','best');
-grid on; title('Frame intervals');
+title('Frame intervals');
 
-title(tl, sprintf('Diagnostics (%s mode) | nAreas=%d', flickerMode, nAreas));
+nexttile;
+plot(timing_error_full*1000,'-o'); grid on;
+ylabel('Timing Error (ms)'); xlabel('Frame #');
+title('Flip - Scheduled Time');
+
+% Super title with unified stats
+title(tl, sprintf('Diagnostics | nAreas=%d | Nominal=%.2f Hz | Achieved=%.2f Hz | Jitter=%.2f ms | Drops=%d', ...
+                  nAreas, nomHz, effHz, jitter_ms, drops));
 end
+
 
 function code_smooth = raised_cosine_smooth(code_long, ramp_len)
 % Raised-cosine smoothing across transitions in a binary code sequence.
