@@ -2,49 +2,31 @@
 function flicker_protocol_two_images_hybrid
     %% ---- PARAMETERS ----
     devModeSkipSync = true;                % set false for real experiments
-    flickerModeDefault = 'hybrid';         % freq, code, hybrid
-    maxDisplaySec = 120;
+    flickerModeDefault = 'code';         % freq, code, hybrid
+    maxDisplaySec = 5;
     framesPerBit = 1;
     overlayAlphaDefault = 128;
     lb_lum = 50; hb_lum = 195;
     stimSize = 400;
-    carrierHzs = [6, 12];
-    imageFiles = {fullfile(pwd, 'project', 'stimulus', 'images', 'capybara.png'), ...
-                  fullfile(pwd, 'project', 'stimulus', 'images', 'zebra2.png') ...
-                  };
     ramp_len = 4;                          % frames for raised-cosine smoothing
-
+    trialTaperFrames = []
     % Codes
     codefile = fullfile(pwd, 'project', 'stimulus', 'codes', 'mgold_61_6521.mat');
     S = load(codefile);
     code  = double(S.codes(1, :)); code2 = double(S.codes(2, :));
     code  = code(:)';            code2 = code2(:)';
 
-    %% ---- DEFINE AREAS ----
-    % INPUT (struct fields in 'args')
-    %   attachStim    (int)    : 1..nStim; index of the base image this overlay attaches to.
-    %   rel_x, rel_y  (0..1)   : fractional position inside the attached image rect
-    %                            (0=left/top, 0.5=center, 1=right/bottom).
-    %   w, h          (px)     : overlay rectangle size.
-    %   alpha         (0..255) : overlay opacity used for alpha blending.
-    %   lb, hb        (0..255) : luminance bounds; map01 → [lb, hb].
-    %   flickerMode   (char)   : 'freq' | 'code' | 'hybrid'.
-    %   carrierHz     (Hz)     : sine carrier frequency (used in 'freq'/'hybrid').
-    %   code          (0/1 vec): binary code (used in 'code'/'hybrid'); expanded to frames.
-    %   framesPerBit  (int≥1)  : frames per code bit.
-    %   ramp_len      (int≥0)  : raised-cosine smoothing length at code transitions (frames).
 
-    areas = [ ...
-        makeArea(struct('attachStim',1,'rel_x',0.5,'rel_y',0.5,'w',stimSize,'h',stimSize, ...
-                        'alpha',overlayAlphaDefault,'lb',lb_lum,'hb',hb_lum, ...
-                        'flickerMode',flickerModeDefault,'carrierHz',carrierHzs(1), ...
-                        'code',code,'framesPerBit',framesPerBit,'ramp_len',ramp_len)), ...
-        makeArea(struct('attachStim',2,'rel_x',0.5,'rel_y',0.5,'w',stimSize,'h',stimSize, ...
-                        'alpha',overlayAlphaDefault,'lb',lb_lum,'hb',hb_lum, ...
-                        'flickerMode',flickerModeDefault,'carrierHz',carrierHzs(2), ...
-                        'code',code2,'framesPerBit',framesPerBit,'ramp_len',ramp_len)), ...
+    stims = [ ...
+    makeStim(struct('file',fullfile(pwd,'project','stimulus','images','capybara.png'), ...
+                    'x', 640,  'y', 540, 'size', 400, ...
+                    'flickerMode',flickerModeDefault,'carrierHz',6,  'code',code)), ...
+    makeStim(struct('file',fullfile(pwd,'project','stimulus','images','zebra2.png'), ...
+                    'x', 1120, 'y', 540, 'size', 400, ...
+                      'flickerMode',flickerModeDefault,'carrierHz',12, 'code',code2)), ...
     ];
-    nAreas = numel(areas);
+
+    nStims = numel(stims);
 
     %% ---- PSYCHTOOLBOX SETUP ----
     if devModeSkipSync
@@ -64,32 +46,40 @@ function flicker_protocol_two_images_hybrid
     ifi = Screen('GetFlipInterval', win); 
     displayFPS = 1/ifi;
 
+ 
+
     %% ---- LOAD & PLACE IMAGES ----
-    nStim = numel(imageFiles);
-    textures = zeros(1, nStim);
-    dstRects = zeros(4, nStim);
+    nStim = numel(stims);
+    textures = zeros(1,nStim);
+    dstRects  = zeros(4,nStim);
 
-    % positions: two images at 30% and 70% width, centered vertically
-    rel_xs = linspace(0.3, 0.7, nStim);
-    rel_y  = 0.5;
-
-    winW = winRect(3); winH = winRect(4);
     for k = 1:nStim
-        img = imread(imageFiles{k});
-        if size(img,3)==1, img = repmat(img, [1 1 3]); end
+        assert(exist(stims(k).file,'file')==2, 'File not found: %s', stims(k).file);
+        img = imread(stims(k).file);
+        if size(img,3)==1, img = repmat(img,[1 1 3]); end
         sz = size(img); minDim = min(sz(1:2));
-        rowStart = floor((sz(1)-minDim)/2)+1;
-        colStart = floor((sz(2)-minDim)/2)+1;
-        imgSq = img(rowStart:rowStart+minDim-1, colStart:colStart+minDim-1, :);
-        imgSq = imresize(imgSq, [stimSize stimSize]);
-        imgSq = im2uint8(mat2gray(imgSq));  % keep identical behavior
+        r0 = floor((sz(1)-minDim)/2)+1; c0 = floor((sz(2)-minDim)/2)+1;
+        imgSq = img(r0:r0+minDim-1, c0:c0+minDim-1, :);
+        imgSq = imresize(imgSq, [stims(k).size stims(k).size]);
+        imgSq = im2uint8(mat2gray(imgSq));
         textures(k) = Screen('MakeTexture', win, imgSq);
-        cx = winW * rel_xs(k); cy = winH * rel_y;
-        dstRects(:,k) = CenterRectOnPointd([0 0 stimSize stimSize], cx, cy);
+
+        dstRects(:,k) = CenterRectOnPointd([0 0 stims(k).size stims(k).size], ...
+                                        stims(k).x, stims(k).y);
     end
-    % Preload after textures exist
     Screen('PreloadTextures', win);
 
+
+    %% Each image → one coupled overlay (same indexing)
+    for k = 1:nStim
+        S = stims(k);
+        areas(k).w = S.size;  areas(k).h = S.size;
+        areas(k).alpha = S.alpha; areas(k).lb = S.lb; areas(k).hb = S.hb;
+        areas(k).flickerMode = S.flickerMode; areas(k).carrierHz = S.carrierHz;
+        areas(k).code = S.code; areas(k).framesPerBit = S.framesPerBit; areas(k).ramp_len = S.ramp_len;
+        % apply taper length tho each area
+        areas(k).trialTaperFrames = trialTaperFrames; 
+    end
     %% ---- TIMEBASE ----
     totalFrames = max(round(maxDisplaySec / ifi), 1);
     t = (0:totalFrames-1) / displayFPS;
@@ -98,7 +88,11 @@ function flicker_protocol_two_images_hybrid
     [areas, mod_signals, all_mod_lum, code_long_all] = precompute_area_modulations(areas, t);
 
     %% ---- PRECOMPUTE OVERLAY RECTS (BY AREA) ----
-    overlayRects = compute_overlay_rects_for_images(areas, dstRects);  % asserts inside
+    overlayRects = dstRects;
+
+
+
+
 
     %% ---- STIMULUS LOOP (optimized, VBL-locked) ----
     Priority(MaxPriority(win));
@@ -152,119 +146,95 @@ function flicker_protocol_two_images_hybrid
 end
 
 %% ---------- HELPERS ----------
-function area = makeArea(args)
-% ARGUMENTS
-% attachStim   : integer 1..nStim
-%     Index of the base image this overlay attaches to (into textures/dstRects).
-%
-% rel_x, rel_y : scalar in [0,1]
-%     Position INSIDE the attached image rect, fractional coords (0=left/top,
-%     0.5=center, 1=right/bottom). Used as the overlay rect’s anchor point.
-%
-% w, h         : pixels
-%     Overlay rectangle width/height drawn over the image (modulated patch).
-%
-% alpha        : 0..255
-%     Overlay opacity used by alpha blending (0=transparent, 255=opaque).
-%
-% lb, hb       : 0..255
-%     Lower/upper luminance bounds. The per-frame modulation is mapped into
-%     this range: L = lb + (hb - lb) * map01, where map01 ∈ [0,1].
-%
-% flickerMode  : 'freq' | 'code' | 'hybrid'
-%     'freq'   : sinusoidal carrier only (map01 = carrier in [0,1]).
-%     'code'   : binary code only (map01 = code in [0,1]).
-%     'hybrid' : carrier .* bipolar(code) in [-1,1], then map to [0,1] via
-%                (x+1)/2 before lb/hb mapping (preserves full contrast).
-%
-% carrierHz    : Hz (≥0)
-%     Sine frequency for 'freq' and 'hybrid' modes.
-%
-% code         : row/vector of 0/1
-%     Binary sequence for 'code' and 'hybrid'. Expanded to frames by
-%     framesPerBit and tiled to the full duration.
-%
-% framesPerBit : integer ≥1
-%     Number of video frames per code bit. Bit rate = refreshHz / framesPerBit.
-%     Increase to give more timing headroom on heavy scenes.
-%
-% ramp_len     : frames ≥0
-%     Raised-cosine smoothing length applied at 0↔1 transitions of the code.
-%     Reduces transients and missed deadlines at sharp edges.
 
-defaults = struct('attachStim',1,'rel_x',0.5,'rel_y',0.5, ...
-                  'w',200,'h',200,'alpha',128,'lb',60,'hb',200, ...
-                  'flickerMode','hybrid','carrierHz',3,'code',[], ...
-                  'framesPerBit',1,'ramp_len',2);
-area = defaults;
-fn = fieldnames(args);
-for i=1:numel(fn), area.(fn{i}) = args.(fn{i}); end
-end
 
 function [areas, mod_signals, all_mod_lum, code_long_all] = precompute_area_modulations(areas, t)
 % Compute per-area modulation & luminance sequences for all frames.
 T = numel(t); nAreas = numel(areas);
-mod_signals = zeros(nAreas, T);
-all_mod_lum  = zeros(nAreas, T);
+mod_signals   = zeros(nAreas, T);   % store map01 (0..1) for all modes
+all_mod_lum   = zeros(nAreas, T);
 code_long_all = cell(1,nAreas);
 
 for k = 1:nAreas
-  A = areas(k);
+    A = areas(k);
 
-  % Expand & smooth code if needed
-  code_long = [];
-  if ~isempty(A.code)
-    code_expanded = repelem(A.code(:).', A.framesPerBit);
-    nrep = ceil(T / numel(code_expanded));
-    code_long = repmat(code_expanded, 1, nrep);
-    code_long = code_long(1:T);
-    pad_val = code_long(1);
-    code_long_padded = [repmat(pad_val,1,A.ramp_len), code_long];
-    code_long_smoothed = raised_cosine_smooth(code_long_padded, A.ramp_len);
-    code_long = code_long_smoothed(A.ramp_len+1:end);
-  end
-  code_long_all{k} = code_long;
+    % --- Build trial-level Hann envelope (0→1→0 over edges only) ---
+    tf = 0;
+    if isfield(A,'trialTaperFrames') && ~isempty(A.trialTaperFrames)
+        tf = max(0, min(A.trialTaperFrames, floor(T/2)));  % clamp to ≤ T/2
+    end
+    env = ones(1,T);  % default: no taper
+    if tf > 0
+        w = hann(2*tf)';                 % 0..1..0 across 2*tf points
+        env(1:tf)           = w(1:tf);   % fade-in
+        env(end-tf+1:end)   = w(tf+1:end); % fade-out
+    end
 
-  carrier = 0.5 + 0.5 * sin(2*pi*A.carrierHz*t); % [0,1]
-  switch lower(A.flickerMode)
-    case 'freq'
-      mod_signal = carrier;        map01 = mod_signal;       % [0,1]
-    case 'code'
-      assert(~isempty(code_long), 'Area %d is code-mode but code missing.', k);
-      mod_signal = code_long;      map01 = mod_signal;       % [0,1]
-    case 'hybrid'
-      assert(~isempty(code_long), 'Area %d is hybrid-mode but code missing.', k);
-      mod_signal = carrier .* (2*code_long - 1);             % [-1,1]
-      map01 = (mod_signal + 1)/2;                            % -> [0,1]
-    otherwise
-      error('Unknown flickerMode: %s', A.flickerMode);
-  end
+    % --- Expand & smooth code if needed ---
+    code_long = [];
+    if ~isempty(A.code)
+        code_expanded = repelem(A.code(:).', A.framesPerBit);
+        nrep = ceil(T / numel(code_expanded));
+        code_long = repmat(code_expanded, 1, nrep);
+        code_long = code_long(1:T);
 
-  mod_signals(k,:) = mod_signal;
-  all_mod_lum(k,:) = A.lb + (A.hb - A.lb) * map01;
+        % SAFETY: ensure we don't obliterate bits
+        if A.ramp_len >= A.framesPerBit/2
+            warning('ramp_len (%d) >= framesPerBit/2 (%g): ramps will overlap and flatten bits.', ...
+                    A.ramp_len, A.framesPerBit/2);
+        end
 
-  areas(k).code_long = code_long;
-  areas(k).mod_signal = mod_signal;
+        % Correct smoothing
+        code_long = raised_cosine_smooth(code_long, A.ramp_len);
+    end
+
+    % --- Base carrier in [0,1] ---
+    carrier01 = 0.5 + 0.5 * sin(2*pi*A.carrierHz*t);   % [0,1]
+
+    % --- Mode selection with contrast-preserving tapering ---
+    switch lower(A.flickerMode)
+        case 'freq'
+            % Taper deviation around mid-gray to keep mean constant
+            c = (carrier01 - 0.5) .* env;      % contrast in [-0.5,0.5] tapered
+            map01 = 0.5 + c;                   % back to [0,1]
+
+        case 'code'
+            assert(~isempty(code_long), 'Area %d is code-mode but code missing.', k);
+            c = (code_long - 0.5) .* env;      % center 0/1 to [-0.5,0.5] then taper
+            map01 = 0.5 + c;                   % [0,1]
+
+        case 'hybrid'
+            assert(~isempty(code_long), 'Area %d is hybrid-mode but code missing.', k);
+            % Hybrid: bipolar product in [-1,1], taper contrast, then map to [0,1]
+            mod_bipolar = (2*code_long - 1) .* (2*carrier01 - 1);  % [-1,1]
+            mod_bipolar = mod_bipolar .* env;                      % taper
+            map01 = (mod_bipolar + 1)/2;                           % [0,1]
+
+        otherwise
+            error('Unknown flickerMode: %s', A.flickerMode);
+    end
+
+    mod_signals(k,:) = map01;                                  % store [0,1]
+    all_mod_lum(k,:) = A.lb + (A.hb - A.lb) * map01;           % luminance
+
+    areas(k).code_long  = code_long;
+    areas(k).mod_signal = map01;  % keep same convention
 end
 end
 
-function overlayRects = compute_overlay_rects_for_images(areas, dstRects)
-% Rect per area, positioned relative to its attached base image rect.
+
+function overlayRects = overlay_rects_coupled_to_images(areas, dstRects)
 n = numel(areas);
 overlayRects = zeros(4,n);
-nStim = size(dstRects,2);
 for k = 1:n
-  assert(areas(k).attachStim>=1 && areas(k).attachStim<=nStim, ...
-      'Area %d attachStim=%d is out of range for %d images.', ...
-      k, areas(k).attachStim, nStim);
-  s = areas(k).attachStim;
-  r = dstRects(:,s);  % [left top right bottom] of the base image
-  w = r(3)-r(1); h = r(4)-r(2);
-  cx = r(1) + areas(k).rel_x * w;
-  cy = r(2) + areas(k).rel_y * h;
-  overlayRects(:,k) = CenterRectOnPointd([0 0 areas(k).w areas(k).h], cx, cy);
+    r = dstRects(:,k);                % image k rect [L T R B]
+    W = r(3)-r(1);  H = r(4)-r(2);    % image size on screen
+    cx = r(1) + areas(k).ov_rel_x * W;
+    cy = r(2) + areas(k).ov_rel_y * H;
+    overlayRects(:,k) = CenterRectOnPointd([0 0 areas(k).w areas(k).h], cx, cy);
 end
 end
+
 
 function cleanup(win, textures)
     for i = 1:numel(textures), Screen('Close', textures(i)); end
@@ -288,17 +258,22 @@ fprintf('Mean abs. timing error: %.5f ms (SD: %.5f ms)\n', ...
 figure('Name','Image Flicker Diagnostics','NumberTitle','off');
 tl = tiledlayout(5, max(2,nAreas), 'TileSpacing','compact');
 
-% Row 1: code sequences
-for k = 1:nAreas
-    nexttile;
-    if ~isempty(code_long_all{k})
-        stairs(1:numel(code_long_all{k}), code_long_all{k}, 'LineWidth', 1.1);
-        ylim([-0.2 1.2]); title(sprintf('Area %d: code',k));
-    else
-        plot(nan); ylim([0 1]); title(sprintf('Area %d: code (none)',k));
+
+% Row 1: code sequences (binary -> stairs; smoothed -> plot)
+% Row 1: code sequences 
+for k = 1:nAreas 
+    nexttile; 
+    if ~isempty(code_long_all{k}) 
+        stairs(1:numel(code_long_all{k}), code_long_all{k}, 'LineWidth', 1.1); 
+        ylim([-0.2 1.2]); title(sprintf('Area %d: code',k)); 
+    else plot(nan); 
+        ylim([0 1]); 
+        title(sprintf('Area %d: code (none)',k)); 
+        end 
+        grid on; 
+        xlabel('Frame'); ylabel('Code'); 
     end
-    grid on; xlabel('Frame'); ylabel('Code');
-end
+
 
 % Row 2: luminance
 for k = 1:nAreas
@@ -349,20 +324,53 @@ title(tl, sprintf('Diagnostics | nAreas=%d | Nominal=%.2f Hz | Achieved=%.2f Hz 
 end
 
 
-function code_smooth = raised_cosine_smooth(code_long, ramp_len)
-% Raised-cosine smoothing for 0/1 sequences at transitions.
-    code_smooth = code_long;
-    N = numel(code_long);
-    if ramp_len <= 0, return; end
-    w = 0.5 * (1 - cos(linspace(0, pi, ramp_len))); % rising edge
-    for i = 2:N
-        if code_long(i) ~= code_long(i-1)
-            j0 = i-ramp_len+1; if j0 < 1, continue; end
-            if code_long(i) == 1
-                code_smooth(j0:i) = w;       % rise 0->1
-            else
-                code_smooth(j0:i) = 1 - w;   % fall 1->0
-            end
-        end
+function y = raised_cosine_smooth(x, ramp_len)
+% Smooth 0/1 sequence x using monotonic raised-cosine crossfades at each transition.
+% ramp_len = half-window in samples (on each side of the transition).
+    y = x;
+    N = numel(x);
+    if ramp_len <= 0 || N < 3, return; end
+
+    % indices of NEW value (i+1 where diff~=0)
+    trans = find(diff(x) ~= 0) + 1;
+
+    for m = 1:numel(trans)
+        i  = trans(m);                % index where new value starts
+        a0 = x(max(1, i-1));          % old level (0 or 1)
+        a1 = x(i);                    % new level (0 or 1)
+
+        i0 = max(1, i - ramp_len);    % left boundary
+        i1 = min(N, i + ramp_len - 1);% right boundary (2*ramp_len samples total ideally)
+        L  = i1 - i0 + 1;
+        if L < 2, continue; end
+
+        u  = linspace(0, 1, L);                 % 0..1 across the local window
+        r  = 0.5 * (1 - cos(pi * u));           % monotonic raised-cosine 0->1
+        y(i0:i1) = (1 - r) .* a0 + r .* a1;     % crossfade old->new
     end
 end
+
+
+
+%% 
+function s = makeStim(args)
+% IMAGE + COUPLED OVERLAY (overlay always centered, full image size)
+% file      : image path
+% x, y      : screen center (px) where the image goes
+% size      : image size (px) after square-crop/resize
+% alpha, lb, hb, flickerMode, carrierHz, code, framesPerBit, ramp_len : as before
+
+defaults = struct( ...
+  'file','', 'x',[], 'y',[], 'size',400, ...
+  'alpha',128,'lb',60,'hb',200, ...
+  'flickerMode','hybrid','carrierHz',6,'code',[], ...
+  'framesPerBit',1,'ramp_len',2, ...
+  'trialTaperFrames',[]); % #frames for Hann taper (or [] for none) % fade length in frames (e.g., 96 by olaf)   
+
+s = defaults;
+fn = fieldnames(args);
+for i=1:numel(fn), s.(fn{i}) = args.(fn{i}); end
+assert(~isempty(s.file) && ~isempty(s.x) && ~isempty(s.y), ...
+  'Stim needs file, x, y.');
+end
+
