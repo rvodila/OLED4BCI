@@ -2,19 +2,20 @@
 function flicker_protocol_two_images_hybrid
     %% ---- PARAMETERS ----
     devModeSkipSync = true;                % set false for real experiments
-    flickerModeDefault = 'code';         % freq, code, hybrid
+    flickerModeDefault = 'freq';         % freq, code, hybrid
     maxDisplaySec = 5;
-    framesPerBit = 1;
+    framesPerBit = 2;
     overlayAlphaDefault = 128;
     lb_lum = 50; hb_lum = 195;
     stimSize = 400;
     ramp_len = 4;                          % frames for raised-cosine smoothing
-    trialTaperFrames = []
+    trialTaperFrames = [];
     % Codes
     codefile = fullfile(pwd, 'project', 'stimulus', 'codes', 'mgold_61_6521.mat');
     S = load(codefile);
-    code  = double(S.codes(1, :)); code2 = double(S.codes(2, :));
-    code  = code(:)';            code2 = code2(:)';
+    code  = double(S.codes(1, :));
+    code2 = double(S.codes(2, :));
+
 
 
     stims = [ ...
@@ -218,7 +219,8 @@ for k = 1:nAreas
     all_mod_lum(k,:) = A.lb + (A.hb - A.lb) * map01;           % luminance
 
     areas(k).code_long  = code_long;
-    areas(k).mod_signal = map01;  % keep same convention
+    areas(k).mod_signal = map01;  
+    code_long_all{k} = code_long;
 end
 end
 
