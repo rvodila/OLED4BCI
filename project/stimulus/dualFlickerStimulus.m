@@ -1,15 +1,16 @@
 % @author: Radovan Vodila (radovan.vodila@ru.nl)
 function flicker_protocol_two_images_hybrid
     %% ---- PARAMETERS ----
-    devModeSkipSync = true;                % set false for real experiments
-    flickerModeDefault = 'freq';         % freq, code, hybrid
-    maxDisplaySec = 5;
-    framesPerBit = 2;
+    devModeSkipSync     = true;          % set false for real experiments
+    flickerModeDefault  = 'hybrid';      % 'freq' | 'code' | 'hybrid'
+    maxDisplaySec       = 50;
+    framesPerBit        = 2;
     overlayAlphaDefault = 128;
-    lb_lum = 50; hb_lum = 195;
-    stimSize = 400;
-    ramp_len = 4;                          % frames for raised-cosine smoothing
-    trialTaperFrames = [];
+    lb_lum              = 50;
+    hb_lum              = 195;
+    stimSize            = 400;
+    ramp_len            = 2;             % frames for raised-cosine smoothing
+    trialTaperFrames    = [];   
     % Codes
     codefile = fullfile(pwd, 'project', 'stimulus', 'codes', 'mgold_61_6521.mat');
     S = load(codefile);
@@ -17,17 +18,28 @@ function flicker_protocol_two_images_hybrid
     code2 = double(S.codes(2, :));
 
 
+    stims(1) = orderfields(makeStim(struct( ...
+        'file', fullfile(pwd,'project','stimulus','images','capybara.png'), ...
+        'x', 640,  'y', 540, 'size', 400, ...
+        'alpha', 128, 'lb', 50, 'hb', 195, ...
+        'flickerMode', 'freq', 'carrierHz', 6, ...
+        'code', code, 'framesPerBit', 2, 'ramp_len', 2, 'trialTaperFrames',60)));
 
-    stims = [ ...
-    makeStim(struct('file',fullfile(pwd,'project','stimulus','images','capybara.png'), ...
-                    'x', 640,  'y', 540, 'size', 400, ...
-                    'flickerMode',flickerModeDefault,'carrierHz',6,  'code',code)), ...
-    makeStim(struct('file',fullfile(pwd,'project','stimulus','images','zebra2.png'), ...
-                    'x', 1120, 'y', 540, 'size', 400, ...
-                      'flickerMode',flickerModeDefault,'carrierHz',12, 'code',code2)), ...
-    ];
+    stims(2) = orderfields(makeStim(struct( ...
+        'file', fullfile(pwd,'project','stimulus','images','zebra2.png'), ...
+        'x', 1120, 'y', 540, 'size', 400, ...
+        'alpha', 128, 'lb', 50, 'hb', 195, ...
+        'flickerMode', 'freq', 'carrierHz', 12, ...
+        'code', code2, 'framesPerBit', 2, 'ramp_len', 2,'trialTaperFrames',60)));
 
-    nStims = numel(stims);
+    % OPTOSENSOR BOX (note: no stray quote after 255)
+    stims(3) = orderfields(makeStim(struct( ...
+        'file', fullfile(pwd,'project','stimulus','images','white.png'), ...
+        'x', 50, 'y', 50, 'size', 200, ...
+        'alpha', 250, 'lb', 0, 'hb', 255, ...
+        'flickerMode', 'freq', 'carrierHz', 50, ...
+        'code', code2, 'framesPerBit', 2, 'ramp_len', 2)));
+
 
     %% ---- PSYCHTOOLBOX SETUP ----
     if devModeSkipSync
@@ -37,7 +49,7 @@ function flicker_protocol_two_images_hybrid
     end 
 
     PsychDefaultSetup(2); KbName('UnifyKeyNames');
-    screens = Screen('Screens'); screenNumber = max(screens);
+    screenNumber = max(Screen('Screens'));
     bgColor = [255 255 255];
     [win, winRect] = Screen('OpenWindow', screenNumber, bgColor);
     
@@ -47,70 +59,81 @@ function flicker_protocol_two_images_hybrid
     ifi = Screen('GetFlipInterval', win); 
     displayFPS = 1/ifi;
 
- 
+ %% ---- LOAD & PLACE IMAGES ----
+nStim = numel(stims);
+textures = zeros(1,nStim);
+dstRects  = zeros(4,nStim);
+areas     = struct([]);  % fresh
 
-    %% ---- LOAD & PLACE IMAGES ----
-    nStim = numel(stims);
-    textures = zeros(1,nStim);
-    dstRects  = zeros(4,nStim);
+for k = 1:nStim
+    assert(exist(stims(k).file,'file')==2, 'File not found: %s', stims(k).file);
+    img = imread(stims(k).file);
+    if size(img,3)==1, img = repmat(img,[1 1 3]); end
 
-    for k = 1:nStim
-        assert(exist(stims(k).file,'file')==2, 'File not found: %s', stims(k).file);
-        img = imread(stims(k).file);
-        if size(img,3)==1, img = repmat(img,[1 1 3]); end
-        sz = size(img); minDim = min(sz(1:2));
-        r0 = floor((sz(1)-minDim)/2)+1; c0 = floor((sz(2)-minDim)/2)+1;
-        imgSq = img(r0:r0+minDim-1, c0:c0+minDim-1, :);
-        imgSq = imresize(imgSq, [stims(k).size stims(k).size]);
-        imgSq = im2uint8(mat2gray(imgSq));
-        textures(k) = Screen('MakeTexture', win, imgSq);
+    % square-crop center + resize
+    sz = size(img);
+    minDim = min(sz(1:2));
+    r0 = floor((sz(1)-minDim)/2)+1; c0 = floor((sz(2)-minDim)/2)+1;
+    imgSq = img(r0:r0+minDim-1, c0:c0+minDim-1, :);
+    imgSq = imresize(imgSq, [stims(k).size stims(k).size]);
+    imgSq = im2uint8(mat2gray(imgSq));
 
-        dstRects(:,k) = CenterRectOnPointd([0 0 stims(k).size stims(k).size], ...
-                                        stims(k).x, stims(k).y);
+    % make texture & rect
+    textures(k) = Screen('MakeTexture', win, imgSq);
+    dstRects(:,k) = CenterRectOnPointd([0 0 stims(k).size stims(k).size], stims(k).x, stims(k).y);
+
+    % build matching area (once)
+    S = stims(k);
+    areas(k).w = S.size;  areas(k).h = S.size;
+    areas(k).alpha = S.alpha; areas(k).lb = S.lb; areas(k).hb = S.hb;
+    areas(k).flickerMode = S.flickerMode; areas(k).carrierHz = S.carrierHz;
+    areas(k).code = S.code; areas(k).framesPerBit = S.framesPerBit; areas(k).ramp_len = S.ramp_len;
+
+    % keep per-stim taper (don’t overwrite with a global [])
+    if isfield(S,'trialTaperFrames') && ~isempty(S.trialTaperFrames)
+        areas(k).trialTaperFrames = S.trialTaperFrames;
+    else
+        areas(k).trialTaperFrames = [];
     end
-    Screen('PreloadTextures', win);
 
-
-    %% Each image → one coupled overlay (same indexing)
-    for k = 1:nStim
-        S = stims(k);
-        areas(k).w = S.size;  areas(k).h = S.size;
-        areas(k).alpha = S.alpha; areas(k).lb = S.lb; areas(k).hb = S.hb;
-        areas(k).flickerMode = S.flickerMode; areas(k).carrierHz = S.carrierHz;
-        areas(k).code = S.code; areas(k).framesPerBit = S.framesPerBit; areas(k).ramp_len = S.ramp_len;
-        % apply taper length tho each area
-        areas(k).trialTaperFrames = trialTaperFrames; 
+    % optional: area name
+    if isfield(S,'name') && ~isempty(S.name)
+        areas(k).name = S.name;
+    else
+        [~, base] = fileparts(S.file);
+        areas(k).name = base;
     end
-    %% ---- TIMEBASE ----
-    totalFrames = max(round(maxDisplaySec / ifi), 1);
-    t = (0:totalFrames-1) / displayFPS;
+end
 
-    %% ---- PRECOMPUTE MODULATION (BY AREA) ----
-    [areas, mod_signals, all_mod_lum, code_long_all] = precompute_area_modulations(areas, t);
+Screen('PreloadTextures', win);
 
-    %% ---- PRECOMPUTE OVERLAY RECTS (BY AREA) ----
-    overlayRects = dstRects;
-
-
-
+%% overlays cover the images 1:1
+overlayRects = dstRects;
 
 
     %% ---- STIMULUS LOOP (optimized, VBL-locked) ----
     Priority(MaxPriority(win));
 
     % Prime pipeline: first flip may return immediately, second settles timing
-    Screen('Flip', win);
-    vbl = Screen('Flip', win);
-
+    waitframes  = 1;                    % 1 = update every refresh (use 2 to update every other)
+    displayFPS  = 1/ifi;                % Hz
+    % #flip iterations we will actually perform, honoring waitframes
+    totalFrames = max(1, floor(maxDisplaySec * displayFPS / waitframes));
+    t = (0:totalFrames-1) / displayFPS;
+    
+    Screen('Flip', win);          % prime
+    vbl = Screen('Flip', win);    % prime
+    targetVBLs = zeros(1, totalFrames);   % <= no NaNs
     vbls       = zeros(1, totalFrames);
-    targetVBLs = nan(1, totalFrames);     % purely diagnostic (theoretical)
+    % preallocate
     alphas     = double([areas.alpha]);    % 1 x nAreas, cached
     colors     = zeros(4, numel(areas));   % preallocate 4 x nAreas
-
+    % ----- PRECOMPUTE MODULATION (BY AREA) -----
+    [areas, mod_signals, all_mod_lum, code_long_all] = precompute_area_modulations(areas, t);
     try
         for frameCount = 1:totalFrames
             % Draw base images
-            Screen('FillRect', win, bgColor);               % cheap clear
+            Screen('FillRect', win, bgColor);               %  clear
             Screen('DrawTextures', win, textures, [], dstRects);
 
             % Draw overlays (batched) without re-allocating matrices
@@ -120,13 +143,12 @@ function flicker_protocol_two_images_hybrid
 
             Screen('FillRect', win, colors, overlayRects);
 
-            % Flip (block on next VBL; keeps pipeline busy)
+            % Flip (VBL-locked)
             vblPrev = vbl;
-            vbl = Screen('Flip', win);
+            vbl = Screen('Flip', win, vbl + (waitframes - 0.5) * ifi);
 
-            % Log actual and theoretical (for plots only)
             vbls(frameCount)       = vbl;
-            targetVBLs(frameCount) = vblPrev + ifi;         % diagnostics, not used for scheduling
+            targetVBLs(frameCount) = vblPrev + waitframes * ifi;  % current frame’s target
 
             % Lightweight exit check (optional: throttle to every few frames)
             [keyIsDown, ~, keyCode] = KbCheck;
@@ -225,19 +247,6 @@ end
 end
 
 
-function overlayRects = overlay_rects_coupled_to_images(areas, dstRects)
-n = numel(areas);
-overlayRects = zeros(4,n);
-for k = 1:n
-    r = dstRects(:,k);                % image k rect [L T R B]
-    W = r(3)-r(1);  H = r(4)-r(2);    % image size on screen
-    cx = r(1) + areas(k).ov_rel_x * W;
-    cy = r(2) + areas(k).ov_rel_y * H;
-    overlayRects(:,k) = CenterRectOnPointd([0 0 areas(k).w areas(k).h], cx, cy);
-end
-end
-
-
 function cleanup(win, textures)
     for i = 1:numel(textures), Screen('Close', textures(i)); end
     sca; ShowCursor;
@@ -248,6 +257,16 @@ nAreas = size(mod_signals,1);
 actual_intervals = diff(vbls); 
 scheduled_intervals = diff(targetVBLs);
 timing_error = vbls - targetVBLs;
+
+% collect names with fallback
+names = cell(1, nAreas);
+for k = 1:nAreas
+    if isfield(areas,'name') && numel(areas) >= k && ~isempty(areas(k).name)
+        names{k} = areas(k).name;
+    else
+        names{k} = sprintf('Area %d', k);
+    end
+end
 
 fprintf('\n=== Frame Timing Diagnostics ===\n');
 fprintf('Mean actual interval: %.5f s (%.2f Hz), SD: %.5f ms\n', ...
@@ -262,19 +281,17 @@ tl = tiledlayout(5, max(2,nAreas), 'TileSpacing','compact');
 
 
 % Row 1: code sequences (binary -> stairs; smoothed -> plot)
-% Row 1: code sequences 
-for k = 1:nAreas 
-    nexttile; 
-    if ~isempty(code_long_all{k}) 
-        stairs(1:numel(code_long_all{k}), code_long_all{k}, 'LineWidth', 1.1); 
-        ylim([-0.2 1.2]); title(sprintf('Area %d: code',k)); 
-    else plot(nan); 
-        ylim([0 1]); 
-        title(sprintf('Area %d: code (none)',k)); 
-        end 
-        grid on; 
-        xlabel('Frame'); ylabel('Code'); 
+
+for k = 1:nAreas
+    nexttile;
+    if ~isempty(code_long_all{k})
+        stairs(1:numel(code_long_all{k}), code_long_all{k}, 'LineWidth', 1.1);
+        ylim([-0.2 1.2]); title(sprintf('%s — code', names{k}));
+    else
+        plot(nan); ylim([0 1]); title(sprintf('%s — code (none)', names{k}));
     end
+    grid on; xlabel('Frame'); ylabel('Code');
+end
 
 
 % Row 2: luminance
@@ -283,7 +300,7 @@ for k = 1:nAreas
     plot(t, all_mod_lum(k,:), 'LineWidth', 1.1);
     fm = flickerModeList(min(k,numel(flickerModeList)));
     chz = carrierHzs(min(k,numel(carrierHzs)));
-    title(sprintf('Area %d: lum (%s, %.2f Hz)',k,fm, chz));
+    title(sprintf('%s — lum (%s, %.2f Hz)', names{k}, fm, chz));
     grid on; xlabel('Time (s)'); ylabel('Lum');
 end
 
@@ -360,7 +377,7 @@ function s = makeStim(args)
 % file      : image path
 % x, y      : screen center (px) where the image goes
 % size      : image size (px) after square-crop/resize
-% alpha, lb, hb, flickerMode, carrierHz, code, framesPerBit, ramp_len : as before
+% alpha, lb, hb, flickerMode, carrierHz, code, framesPerBit, ramp_len
 
 defaults = struct( ...
   'file','', 'x',[], 'y',[], 'size',400, ...
