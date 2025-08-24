@@ -5,13 +5,12 @@
 %
 %  PURPOSE
 %  -------
-%  Present two flickering images with per-stimulus temporal modulation
-%  (freq / code / hybrid). Images are drawn with *feathered* (Gaussian)
-%  alpha at the edges so they fade smoothly into the background with no
-%  hard corners. A third square (optosensor "diode") is drawn without
-%  feathering for clean photodiode recordings.
+%  Present k flickering images with luminance modulation (freq / code / hybrid). 
+%  Images are drawn with *feathered* (Gaussian) alpha at the edges so they fade smoothly into the background with no
+%  hard corners. 
+%  A third square (optosensor "diode") is drawn without feathering for clean photodiode recordings.
 %
-%  WHAT THIS SCRIPT DOES
+%  WHAT WE DO
 %  ---------------------
 %  1) Loads & centers images; square-crops and resizes to a fixed size.
 %  2) Builds an RGBA texture for each image with a Gaussian edge alpha mask
@@ -37,11 +36,12 @@
 function flicker_protocol_two_images_hybrid
 
     %% --------------------------------------------------------------------
-    %  PARAMETERS
+    %  PARAMETERS, reference these in stimulus construction; 77 onwards
     % ---------------------------------------------------------------------
     devModeSkipSync     = true;          % set false for real experiments
+    maxDisplaySec       = 300;             % total presentation time (s)
+    
     flickerModeDefault  = 'hybrid';      % 'freq' | 'code' | 'hybrid' (default fallback)
-    maxDisplaySec       = 5;             % total presentation time (s)
     framesPerBit        = 2;             % code upsampling (frames/bit)
     overlayAlphaDefault = 128;           % default overlay alpha (used via stims)
     lb_lum              = 50;            % low luminance (0..255)
@@ -174,7 +174,7 @@ function flicker_protocol_two_images_hybrid
         end
     end
 
-    Screen('PreloadTextures', win);
+
 
     %% --------------------------------------------------------------------
     %  BUILD OVERLAY TEXTURES (feathered alpha; diode kept sharp)
@@ -200,6 +200,7 @@ function flicker_protocol_two_images_hybrid
         overlayTex(k) = Screen('MakeTexture', win, rgba);
     end
     overlayRects = dstRects;     % overlays are 1:1 with image rects
+    Screen('PreloadTextures', win);
 
     %% --------------------------------------------------------------------
     %  STIMULUS LOOP (VBL-locked)
@@ -414,14 +415,14 @@ for k = 1:nAreas
     grid on; xlabel('Time (s)'); ylabel('Lum');
 end
 
-% Row 3: autocorrelation per area
-for k = 1:nAreas
-    nexttile;
-    [acf, lags] = xcorr(mod_signals(k,:), 'coeff');
-    plot(lags, acf, 'LineWidth',1.1); ylim([0 1]);
-    title(sprintf('Area %d: autocorr',k));
-    grid on; xlabel('Lag (frames)'); ylabel('Norm. corr');
-end
+% % Row 3: autocorrelation per area
+% for k = 1:nAreas
+%     nexttile;
+%     [acf, lags] = xcorr(mod_signals(k,:), 'coeff');
+%     plot(lags, acf, 'LineWidth',1.1); ylim([0 1]);
+%     title(sprintf('Area %d: autocorr',k));
+%     grid on; xlabel('Lag (frames)'); ylabel('Norm. corr');
+% end
 
 % Row 4: histogram + intervals
 nexttile([1 max(1,ceil(nAreas/2))]);
