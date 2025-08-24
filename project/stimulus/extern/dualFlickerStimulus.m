@@ -1,5 +1,8 @@
 % @author: Radovan Vodila (radovan.vodila@ru.nl)
-
+% to do:
+% Gamma Linearization
+% Gaussian spatial blur
+% optosensor integration
 
 function flicker_protocol_two_images_hybrid
     %% ---- PARAMETERS ----
@@ -11,6 +14,10 @@ function flicker_protocol_two_images_hybrid
     stimSize = 400;
     rel_xs = [0.30, 0.70]; rel_y = 0.5;
     carrierHzs = [5, 15];
+    % gaussian blur
+    imgSigmaPx      = 2;    % Gaussian sigma (in *pixels*) for image blur
+    overlaySigmaPx  = 40;   % Gaussian sigma for the overlay’s spatial falloff
+
     imageFiles = {fullfile(pwd, 'project', 'stimulus', 'images', 'capybara.png'), ...
                   fullfile(pwd, 'project', 'stimulus', 'images', 'zebra2.png')};
     ramp_len = 4; % number of frames over which to smooth transitions
@@ -53,11 +60,36 @@ function flicker_protocol_two_images_hybrid
         imgSq = img(rowStart:rowStart+minDim-1, colStart:colStart+minDim-1, :);
         imgSq = imresize(imgSq, [stimSize stimSize]);
         imgSq = im2uint8(mat2gray(imgSq));
+        imgSq = imgaussfilt(imgSq, imgSigmaPx);
         textures(k) = Screen('MakeTexture', win, imgSq);
         x = winW * rel_xs(k); y = winH * rel_y;
         dstRects(:,k) = CenterRectOnPointd([0 0 stimSize stimSize], x, y);
     end
+   %% 
+    overlayAlpha = 128;  % keep your current alpha cap
 
+    overlayTex  = zeros(1,nStim);
+
+for k = 1:nStim
+    % --- Make a centered Gaussian alpha mask (0..1), same size as stim ---
+    [X,Y] = meshgrid(1:stimSize, 1:stimSize);
+    cx = (stimSize+1)/2; cy = (stimSize+1)/2;
+    g = exp(-((X-cx).^2 + (Y-cy).^2) / (2*overlaySigmaPx^2)); % 2D Gaussian
+    g = g / max(g(:));                                      % normalize 0..1
+
+    % Optionally cap to keep center fully opaque up to a radius:
+    % radiusPx = stimSize*0.4; 
+    % r = sqrt((X-cx).^2 + (Y-cy).^2);
+    % core = double(r <= radiusPx);
+    % g = max(g, core);  % "flat-ish" center with soft edges
+
+    % Build an RGBA image: RGB=white (will be tinted per frame), A = gaussian*overlayAlpha
+    rgba = zeros(stimSize, stimSize, 4, 'uint8');
+    rgba(:,:,1:3) = 255;                                 % white; per-frame tint sets luminance
+    rgba(:,:,4)   = uint8(g * overlayAlpha);             % premultiplied alpha mask
+
+    overlayTex(k) = Screen('MakeTexture', win, rgba);
+end
     %% ---- PRECOMPUTE FLICKER MODULATION ----
     nOverlays = 2;
     all_mod_lum = zeros(nOverlays, totalFrames);
@@ -112,15 +144,22 @@ function flicker_protocol_two_images_hybrid
             Screen('FillRect', win, bgColor);
             for k = 1:nStim
                 Screen('DrawTexture', win, textures(k), [], dstRects(:,k));
-                overlayLum = round(all_mod_lum(k, idx));
-                overlayColor = [overlayLum overlayLum overlayLum overlayAlpha];
-                Screen('FillRect', win, overlayColor, dstRects(:,k));
+                % Desired per-frame overlay luminance in [0..255]
+                overlayLum  = round(all_mod_lum(k, idx));
+
+                % Use modulateColor to tint the (white) overlay texture to the target gray.
+                % IMPORTANT: Give alpha=1 here; the *texture’s* alpha channel (Gaussian) controls softness.
+                modColor = [overlayLum overlayLum overlayLum 255];  % uint8-like 0..255
+
+            % Draw the Gaussian-masked overlay on top of the image
+                Screen('DrawTexture', win, overlayTex(k), [], dstRects(:,k), [], [], [], modColor);
             end
 
                 %targetTime = vbl + 0.5*ifi;      % What we aske for (scheduled time)
-                targetTime = vbl + ifi;      % What we aske for (scheduled time)
+                targetTime = vbl + 0.5*ifi;                 % or (waitframes-0.5)*ifi if you add waitframes
+                vbl = Screen('Flip', win, targetTime);
+                % What we aske for (scheduled time)
                 %vbl = Screen('Flip', win, targetTime);   % When the frame actually flipped
-                vbl = Screen('Flip', win);   % When the frame actually flipped
                 vbls(frameCount) = vbl;                 % Store actual flip time
                 targetVBLs(frameCount) = targetTime;    % Store target flip time
 
