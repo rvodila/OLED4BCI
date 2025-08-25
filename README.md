@@ -24,8 +24,8 @@ We explore advanced stimulus tagging techniques for applications in BCI (Brain-C
 ## Features
 
 - MATLAB Psychtoolbox code for presenting:
-  - Static images with flexible frequency, code, or hybrid flicker modulation
-  - Video stimuli with tagged overlays
+  - Static images with flexible frequency, code, or hybrid flicker modulation: dualFlickerStimulus.m
+  - Video stimuli with tagged overlays and chirp-tagged audio: ../video_tagging/video_audio_tagging.m
 - Support for gold code and custom modulation sequences
 - Automatic analysis and visualization of modulation/correlation properties
 
