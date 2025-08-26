@@ -79,14 +79,14 @@ function flicker_protocol_two_images_hybrid
         'file', fullfile(pwd,'project','stimulus','images','capybara.png'), ...
         'x', 640,  'y', 540, 'size', 400, ...
         'alpha', 128, 'lb', 50, 'hb', 195, ...
-        'flickerMode', 'freq', 'carrierHz', 65, ...
+        'flickerMode', 'freq', 'carrierHz', 20, ...
         'code', code, 'framesPerBit', 2, 'ramp_len', 2, 'trialTaperFrames',60)));
 
     stims(2) = orderfields(makeStim(struct( ...
         'file', fullfile(pwd,'project','stimulus','images','zebra2.png'), ...
         'x', 1120, 'y', 540, 'size', 400, ...
         'alpha', 128, 'lb', 50, 'hb', 195, ...
-        'flickerMode', 'freq', 'carrierHz', 60, ...
+        'flickerMode', 'freq', 'carrierHz', 24, ...
         'code', code2, 'framesPerBit', 2, 'ramp_len', 2,'trialTaperFrames',60)));
 
     % Optosensor (photodiode) square: kept *sharp* (no feather) by design.
@@ -94,7 +94,7 @@ function flicker_protocol_two_images_hybrid
         'file', fullfile(pwd,'project','stimulus','images','white.png'), ...
         'x', 50, 'y', 50, 'size', 200, ...
         'alpha', 255, 'lb', 0, 'hb', 255, ...
-        'flickerMode', 'freq', 'carrierHz', 120, ...
+        'flickerMode', 'freq', 'carrierHz', 30, ...
         'code', code2, 'framesPerBit', 2, 'ramp_len', 2)));
     diodeidx = 3; % index of the optosensor patch in stims
 
@@ -219,13 +219,21 @@ function flicker_protocol_two_images_hybrid
     targetVBLs = zeros(1, totalFrames);
     vbls       = zeros(1, totalFrames);
 
+        % --- timing logs -------------------------------------------------
+    computeTimes   = nan(1, totalFrames);  % draw-only time (s), per frame
+    slackTimes     = nan(1, totalFrames);  % time left before flip deadline (s)
+    draw2flipTimes = nan(1, totalFrames);  % draw start → Flip return (s)
+
     % Precompute temporal modulation per area
     [areas, mod_signals, all_mod_lum, code_long_all] = precompute_area_modulations(areas, t);
 
     try
         for frameCount = 1:totalFrames
             % --- Draw base images ----------------------------------------
-            Screen('FillRect', win, bgColor);                    % clear
+            %Screen('FillRect', win, bgColor);                    % 
+            
+            % set timestamp
+            drawStart = GetSecs;
             Screen('DrawTextures', win, textures, [], dstRects); % images (with feathered alpha)
 
             % --- Draw feathered overlays, tinted to per-frame luminance ---
@@ -236,7 +244,14 @@ function flicker_protocol_two_images_hybrid
 
             % --- Flip (locked to VBL) ------------------------------------
             vblPrev = vbl;
-            vbl     = Screen('Flip', win, vbl + (waitframes - 0.5) * ifi);
+            flipWhen   = vbl + (waitframes - 0.5) * ifi;   % use deadline 
+            t_preflip = GetSecs % log end of compute, right before flip
+            vbl        = Screen('Flip', win, flipWhen);
+            
+            % calculate compute timings
+            computeTimes(frameCount)   = t_preflip - drawStart;          % draw-only time
+            slackTimes(frameCount)     = flipWhen   - t_preflip;          % time left before deadline
+            draw2flipTimes(frameCount) = vbl         - drawStart;         % includes PTB wait
 
             vbls(frameCount)       = vbl;                                % actual flip time
             targetVBLs(frameCount) = vblPrev + waitframes * ifi;         % scheduled target
@@ -257,8 +272,11 @@ function flicker_protocol_two_images_hybrid
     %  DIAGNOSTICS (timing & modulation)
     % ---------------------------------------------------------------------
     flickerModes = string({areas.flickerMode});
-    plot_modulation_diagnostics_img(mod_signals, all_mod_lum, t, code_long_all, ...
-        flickerModes, vbls, targetVBLs, [areas.carrierHz], ifi, areas);
+    plot_modulation_diagnostics_img( ...
+        mod_signals, all_mod_lum, t, code_long_all, ...
+        flickerModes, vbls, targetVBLs, [areas.carrierHz], ifi, areas, ...
+        computeTimes, slackTimes, draw2flipTimes);
+
 end
 
 %% ===========================  HELPERS  ==================================
@@ -358,7 +376,10 @@ function cleanup(win, textures)
     sca; ShowCursor;
 end
 
-function plot_modulation_diagnostics_img(mod_signals, all_mod_lum, t, code_long_all, flickerModeList, vbls, targetVBLs, carrierHzs, ifi, areas)
+function plot_modulation_diagnostics_img(mod_signals, all_mod_lum, t, code_long_all, ...
+    flickerModeList, vbls, targetVBLs, carrierHzs, ifi, areas, ...
+    computeTimes, slackTimes, draw2flipTimes)
+
 % PLOT_MODULATION_DIAGNOSTICS_IMG
 % -------------------------------
 % Visual diagnostics for:
@@ -381,6 +402,12 @@ for k = 1:nAreas
         names{k} = sprintf('Area %d', k);
     end
 end
+fprintf('Compute time (draw only):   mean %.3f ms, p95 %.3f ms, max %.3f ms\n', ...
+    mean(computeTimes,'omitnan')*1000, prctile(computeTimes,95)*1000, max(computeTimes));
+fprintf('Slack before deadline:      mean %.3f ms, p05 %.3f ms, min %.3f ms\n', ...
+    mean(slackTimes,'omitnan')*1000, prctile(slackTimes,5)*1000, min(slackTimes));
+fprintf('Draw→Flip wall time:        mean %.3f ms\n', mean(draw2flipTimes,'omitnan')*1000);
+disp(repmat('_',1,100));
 
 fprintf('\n=== Frame Timing Diagnostics ===\n');
 fprintf('Mean actual interval: %.5f s (%.2f Hz), SD: %.5f ms\n', ...
@@ -391,7 +418,8 @@ fprintf('Mean abs. timing error: %.5f ms (SD: %.5f ms)\n', ...
     mean(abs(timing_error))*1000, std(timing_error)*1000);
 
 figure('Name','Image Flicker Diagnostics','NumberTitle','off');
-tl = tiledlayout(5, max(2,nAreas), 'TileSpacing','compact');
+tl = tiledlayout(6, max(2,nAreas), 'TileSpacing','compact');
+
 
 % Row 1: code sequences (binary -> stairs; smoothed -> plot)
 for k = 1:nAreas
@@ -448,6 +476,17 @@ nomHz = 1/ifi;
 d = diff(vbls);
 effHz = 1/mean(d);
 jitter_ms = std(d)*1000;
+
+% Row 6: compute-time + slack histograms
+nexttile([1 max(1,ceil(nAreas/2))]);
+histogram(computeTimes*1000, 30);
+xlabel('Compute time (ms)'); ylabel('Count');
+title('Draw-only time per frame'); grid on;
+
+nexttile([1 max(1,floor(nAreas/2))]);
+histogram(slackTimes*1000, 30);
+xlabel('Slack before flip deadline (ms)'); ylabel('Count');
+title('Time budget remaining at Flip call'); grid on;
 
 title(tl, sprintf('Diagnostics | nAreas=%d | Nominal=%.2f Hz | Achieved=%.2f Hz | Jitter=%.2f ms', ...
                   nAreas, nomHz, effHz, jitter_ms));
