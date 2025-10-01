@@ -259,7 +259,9 @@ function flicker_protocol_two_images_hybrid
             % --- Draw feathered overlays, tinted to per-frame luminance ---
             %     modColors: 4×n (RGB tint; A=255 so the texture's alpha masks the edges)
             lumRow    = all_mod_lum(:, frameCount).';                    % 1×nStim, in 0..255
-            modColors = [repmat(lumRow,3,1); 255*ones(1,nStim)];         % RGB=tint, A=255
+            modColors = uint8(zeros(4, nStim));
+            modColors(1:3,:) = lumRow(ones(3,1),:);   % copy lumRow into rows 1–3
+            modColors(4,:)   = 255;
             Screen('DrawTextures', win, overlayTex, [], overlayRects, [], [], [], modColors);
  
             % --- Flip (locked to VBL) ------------------------------------
