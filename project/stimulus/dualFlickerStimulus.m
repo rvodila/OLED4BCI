@@ -94,7 +94,7 @@ function flicker_protocol_two_images_hybrid
         'file', fullfile(pwd,'project','stimulus','images','white.png'), ...
         'x', 50, 'y', 50, 'size', 200, ...
         'alpha', 255, 'lb', 0, 'hb', 255, ...
-        'flickerMode', 'freq', 'carrierHz', 200, ...
+        'flickerMode', 'alt', 'carrierHz', 60, ...
         'code', code2, 'framesPerBit', framesPerBit, 'ramp_len', 2, 'trialTaperFrames',0)));
     diodeidx = 3; % index of the optosensor patch in stims
  
@@ -374,7 +374,12 @@ for k = 1:nAreas
             mod_bipolar = (2*code_long - 1) .* (2*carrier01 - 1);  % [-1,1]
             mod_bipolar = mod_bipolar .* env;                      % taper
             map01 = (mod_bipolar + 1)/2;                           % [0,1]
- 
+        case 'alt'   % alternating for diode
+        % Alternate 0/1 each frame (black–white)
+        alt = mod(0:T-1, 2);          % sequence 0,1,0,1,...
+        c   = (alt - 0.5) .* env;     % center around 0.5, apply taper
+        map01 = 0.5 + c;              % back to [0,1]
+
         otherwise
             error('Unknown flickerMode: %s', A.flickerMode);
     end
