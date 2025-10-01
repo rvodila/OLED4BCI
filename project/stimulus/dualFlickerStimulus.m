@@ -5,16 +5,16 @@
 %
 %  PURPOSE
 %  -------
-%  Present k flickering images with luminance modulation (freq / code / hybrid). 
+%  Present k flickering images with luminance modulation (freq / code / hybrid).
 %  Images are drawn with *feathered* (Gaussian) alpha at the edges so they fade smoothly into the background with no
-%  hard corners. 
+%  hard corners.
 %  A third square (optosensor "diode") is drawn without feathering for clean photodiode recordings.
 %
 %  WHAT WE DO
 %  ---------------------
 %  1) Loads & centers images; square-crops and resizes to a fixed size.
 %  2) Builds an RGBA texture for each image with a Gaussian edge alpha mask
-%     (feather) — RGB = image, A = mask (0 at edges → 255 at center).
+%     (feather) — RGB = image, A = mask (0 at edges ? 255 at center).
 %  3) Builds a matching overlay texture with the same feathered alpha that
 %     is tinted each frame to the desired luminance (per-stim modulation).
 %  4) Runs a VBL-locked stimulus loop and flips at every refresh.
@@ -24,7 +24,7 @@
 %  -------------------------
 %  - Blending is set to GL_SRC_ALPHA / GL_ONE_MINUS_SRC_ALPHA, so the alpha
 %    channel of the image and overlay textures handles the feathered edges.
-%  - The optosensor (stims(3)) is *not* feathered: it uses a full-alpha
+%  - The optosensor (e.g. stims(3)) is *not* feathered: it uses a full-alpha
 %    square so the photodiode sees a sharp, high-contrast patch.
 %
 %  TODO / EXTENSIONS
@@ -34,35 +34,35 @@
 %  - Add on-screen calibration helpers (photodiode probe)
 % =========================================================================
 function flicker_protocol_two_images_hybrid
-
+ 
     %% --------------------------------------------------------------------
     %  PARAMETERS, reference these in stimulus construction; 77 onwards
     % ---------------------------------------------------------------------
     devModeSkipSync     = true;          % set false for real experiments
-    maxDisplaySec       = 60;             % total presentation time (s)
-    
+    maxDisplaySec       = 20;             % total presentation time (s)
+   
     flickerModeDefault  = 'hybrid';      % 'freq' | 'code' | 'hybrid' (default fallback)
-    framesPerBit        = 2;             % code upsampling (frames/bit)
+    framesPerBit        = 6;             % code upsampling (frames/bit)
     overlayAlphaDefault = 128;           % default overlay alpha (used via stims)
     lb_lum              = 50;            % low luminance (0..255)
     hb_lum              = 195;           % high luminance (0..255)
     stimSize            = 400;           % image size after crop/resize (px)
     ramp_len            = 2;             % frames for raised-cosine smoothing of codes
     trialTaperFrames    = [];            % per-stim Hann taper at trial edges (frames)
-
+ 
     % ---- Codes (two distinct m-sequences for demonstration) --------------
-    codefile = fullfile(pwd, 'project', 'stimulus', 'codes', 'mgold_61_6521.mat');
+    codefile = fullfile(pwd, 'project','stimulus','codes', 'mgold_61_6521.mat');
     S = load(codefile);
     code  = double(S.codes(1, :));
     code2 = double(S.codes(2, :));
-
+ 
     % ---- Feathering parameters (spatial Gaussian fade to background) -----
     %  featherCoreFrac : fraction of half-size that remains fully opaque.
-    %                    Example: 0.6 → inner 60% (of radius) full alpha.
+    %                    Example: 0.6 ? inner 60% (of radius) full alpha.
     %  featherSigmaPx  : Gaussian sigma in pixels controlling edge softness.
     featherCoreFrac = 0.6;
     featherSigmaPx  = 30;
-
+ 
     % ---- Stimulus definitions --------------------------------------------
     %  file        : path to image
     %  x,y         : screen center for the image
@@ -76,28 +76,28 @@ function flicker_protocol_two_images_hybrid
     %  ramp_len    : smoothing (frames) at code transitions
     %  trialTaperFrames : optional Hann taper length at trial begin/end
     stims(1) = orderfields(makeStim(struct( ...
-        'file', fullfile(pwd,'project','stimulus','images','capybara.png'), ...
+        'file', fullfile(pwd,  'project','stimulus', 'images','capybara.png'), ...
         'x', 640,  'y', 540, 'size', 400, ...
         'alpha', 128, 'lb', 50, 'hb', 195, ...
-        'flickerMode', 'freq', 'carrierHz', 20, ...
-        'code', code, 'framesPerBit', 2, 'ramp_len', 2, 'trialTaperFrames',60)));
-
+        'flickerMode', 'freq', 'carrierHz', 64, ...
+        'code', code, 'framesPerBit', framesPerBit, 'ramp_len', 2, 'trialTaperFrames',60)));
+ 
     stims(2) = orderfields(makeStim(struct( ...
         'file', fullfile(pwd,'project','stimulus','images','zebra2.png'), ...
         'x', 1120, 'y', 540, 'size', 400, ...
         'alpha', 128, 'lb', 50, 'hb', 195, ...
-        'flickerMode', 'freq', 'carrierHz', 24, ...
-        'code', code2, 'framesPerBit', 2, 'ramp_len', 2,'trialTaperFrames',60)));
-
+        'flickerMode', 'freq', 'carrierHz', 60, ...
+        'code', code2, 'framesPerBit', framesPerBit, 'ramp_len', 2,'trialTaperFrames',60)));
+ 
     % Optosensor (photodiode) square: kept *sharp* (no feather) by design.
     stims(3) = orderfields(makeStim(struct( ...
         'file', fullfile(pwd,'project','stimulus','images','white.png'), ...
         'x', 50, 'y', 50, 'size', 200, ...
         'alpha', 255, 'lb', 0, 'hb', 255, ...
-        'flickerMode', 'freq', 'carrierHz', 30, ...
-        'code', code2, 'framesPerBit', 2, 'ramp_len', 2)));
+        'flickerMode', 'freq', 'carrierHz', 200, ...
+        'code', code2, 'framesPerBit', framesPerBit, 'ramp_len', 2, 'trialTaperFrames',0)));
     diodeidx = 3; % index of the optosensor patch in stims
-
+ 
     %% --------------------------------------------------------------------
     %  PSYCHTOOLBOX SETUP
     % ---------------------------------------------------------------------
@@ -106,19 +106,39 @@ function flicker_protocol_two_images_hybrid
     else
         Screen('Preference','SkipSyncTests', 0);  % real runs: enforce sync
     end
-
+ 
     PsychDefaultSetup(2); KbName('UnifyKeyNames');
     screenNumber = max(Screen('Screens'));
     bgColor = [255 255 255];                         % white background
     [win, winRect] = Screen('OpenWindow', screenNumber, bgColor);
-
+    
+    fprintf('\n=== DISPLAY TIMING DIAGNOSTICS ===\n');
+ 
+    % OS / GPU advertised refresh rate
+    
+    nomHz = Screen('NominalFrameRate', win);
+    
+    fprintf('NominalFrameRate (OS/GPU reported): %.2f Hz\n', nomHz);
+     
+    % Psychtoolbox measured IFI (average flip interval)
+    
+    ifi_measured = Screen('GetFlipInterval', win, 100, 0.0001, 20);
+    
+    fprintf('PTB measured IFI: %.6f s (%.2f Hz)\n', ifi_measured, 1/ifi_measured);
+     
+    % Resolution check
+    
+    res = Screen('Resolution', screenNumber);
+    
+    fprintf('Resolution: %dx%d @ %.2f Hz (OS level)\n', res.width, res.height, res.hz);
+    
     % Alpha blending: source over destination with source alpha
     Screen('BlendFunction', win, 'GL_SRC_ALPHA', 'GL_ONE_MINUS_SRC_ALPHA');
     HideCursor;
-
+ 
     ifi = Screen('GetFlipInterval', win);
     displayFPS = 1/ifi;                              % nominal refresh (Hz)
-
+ 
     %% --------------------------------------------------------------------
     %  LOAD, CROP, RESIZE, & PLACE IMAGES  (+ FEATHERED ALPHA)
     % ---------------------------------------------------------------------
@@ -126,12 +146,12 @@ function flicker_protocol_two_images_hybrid
     textures = zeros(1,nStim);                       % RGBA image textures
     dstRects = zeros(4,nStim);                       % destination rects
     areas    = struct([]);                           % per-stim modulation params
-
+ 
     for k = 1:nStim
         assert(exist(stims(k).file,'file')==2, 'File not found: %s', stims(k).file);
         img = imread(stims(k).file);
         if size(img,3)==1, img = repmat(img,[1 1 3]); end
-
+ 
         % --- Center square-crop & resize to target size -------------------
         sz = size(img);
         minDim = min(sz(1:2));
@@ -139,32 +159,32 @@ function flicker_protocol_two_images_hybrid
         imgSq = img(r0:r0+minDim-1, c0:c0+minDim-1, :);
         imgSq = imresize(imgSq, [stims(k).size stims(k).size]);
         imgSq = im2uint8(mat2gray(imgSq));          % ensure 0..255
-
+ 
         % --- Feathered alpha: 1 at center, Gaussian falloff to 0 at edges -
         alphaMask = makeFeatherMask(stims(k).size, featherCoreFrac, featherSigmaPx);
-
+ 
         % --- Build RGBA texture: RGB=image, A=feathered alpha -------------
         rgba = zeros(stims(k).size, stims(k).size, 4, 'uint8');
         rgba(:,:,1:3) = imgSq;
         rgba(:,:,4)   = alphaMask;
-
+ 
         textures(k)   = Screen('MakeTexture', win, rgba);
         dstRects(:,k) = CenterRectOnPointd([0 0 stims(k).size stims(k).size], stims(k).x, stims(k).y);
-
+ 
         % --- Build matching "area" descriptor used for temporal modulation
         S = stims(k);
         areas(k).w = S.size;  areas(k).h = S.size;
         areas(k).alpha = S.alpha; areas(k).lb = S.lb; areas(k).hb = S.hb;
         areas(k).flickerMode = S.flickerMode; areas(k).carrierHz = S.carrierHz;
         areas(k).code = S.code; areas(k).framesPerBit = S.framesPerBit; areas(k).ramp_len = S.ramp_len;
-
+ 
         % Optional per-stim trial taper (Hann over begin/end of trial)
         if isfield(S,'trialTaperFrames') && ~isempty(S.trialTaperFrames)
             areas(k).trialTaperFrames = S.trialTaperFrames;
         else
             areas(k).trialTaperFrames = [];
         end
-
+ 
         % Optional area name (fallback to file base name)
         if isfield(S,'name') && ~isempty(S.name)
             areas(k).name = S.name;
@@ -173,9 +193,9 @@ function flicker_protocol_two_images_hybrid
             areas(k).name = base;
         end
     end
-
-
-
+ 
+ 
+ 
     %% --------------------------------------------------------------------
     %  BUILD OVERLAY TEXTURES (feathered alpha; diode kept sharp)
     % ---------------------------------------------------------------------
@@ -184,16 +204,16 @@ function flicker_protocol_two_images_hybrid
     overlayTex  = zeros(1, nStim);
     for k = 1:nStim
         sz = stims(k).size;
-
+ 
         if k == diodeidx
-            % Optosensor patch: NO feathering → full alpha (sharp square)
+            % Optosensor patch: NO feathering ? full alpha (sharp square)
             a = uint8(255 * ones(sz, sz));
         else
             % Same feather as the image; also respect per-stim base alpha
             a = makeFeatherMask(sz, featherCoreFrac, featherSigmaPx);
             a = uint8(double(a) .* (double(stims(k).alpha)/255));
         end
-
+ 
         rgba = zeros(sz, sz, 4, 'uint8');
         rgba(:,:,1:3) = 255;    % white; will be per-frame tinted to target luminance
         rgba(:,:,4)   = a;      % feathered (or full) alpha
@@ -201,61 +221,61 @@ function flicker_protocol_two_images_hybrid
     end
     overlayRects = dstRects;     % overlays are 1:1 with image rects
     Screen('PreloadTextures', win);
-
+ 
     %% --------------------------------------------------------------------
     %  STIMULUS LOOP (VBL-locked)
     % ---------------------------------------------------------------------
     Priority(MaxPriority(win));
-
+ 
     % Precompute timing grid & diagnostics buffers
     waitframes  = 1;                                % update every refresh
     displayFPS  = 1/ifi;
     totalFrames = max(1, floor(maxDisplaySec * displayFPS / waitframes));
     t = (0:totalFrames-1) / displayFPS;             % seconds from start
-
+ 
     % Prime pipeline (first flip may return immediately; second stabilizes)
     Screen('Flip', win);
     vbl = Screen('Flip', win);
     targetVBLs = zeros(1, totalFrames);
     vbls       = zeros(1, totalFrames);
-
+ 
         % --- timing logs -------------------------------------------------
     computeTimes   = nan(1, totalFrames);  % draw-only time (s), per frame
     slackTimes     = nan(1, totalFrames);  % time left before flip deadline (s)
-    draw2flipTimes = nan(1, totalFrames);  % draw start → Flip return (s)
-
+    draw2flipTimes = nan(1, totalFrames);  % draw start ? Flip return (s)
+ 
     % Precompute temporal modulation per area
     [areas, mod_signals, all_mod_lum, code_long_all] = precompute_area_modulations(areas, t);
-
+    missedFrames = nan(1, totalFrames);
     try
         for frameCount = 1:totalFrames
             % --- Draw base images ----------------------------------------
-            %Screen('FillRect', win, bgColor);                    % 
-            
+            %Screen('FillRect', win, bgColor);                    %
+           
             % set timestamp
             drawStart = GetSecs;
             Screen('DrawTextures', win, textures, [], dstRects); % images (with feathered alpha)
-
+ 
             % --- Draw feathered overlays, tinted to per-frame luminance ---
             %     modColors: 4×n (RGB tint; A=255 so the texture's alpha masks the edges)
             lumRow    = all_mod_lum(:, frameCount).';                    % 1×nStim, in 0..255
             modColors = [repmat(lumRow,3,1); 255*ones(1,nStim)];         % RGB=tint, A=255
             Screen('DrawTextures', win, overlayTex, [], overlayRects, [], [], [], modColors);
-
+ 
             % --- Flip (locked to VBL) ------------------------------------
             vblPrev = vbl;
-            flipWhen   = vbl + (waitframes - 0.5) * ifi;   % use deadline 
-            t_preflip = GetSecs % log end of compute, right before flip
-            vbl        = Screen('Flip', win, flipWhen);
-            
+            flipWhen   = vbl + (waitframes - 0.5) * ifi;   % use deadline
+            t_preflip = GetSecs; % log end of compute, right before flip
+            [vbl, stimOnset, flipTS, missed] = Screen('Flip', win, flipWhen);
+            missedFrames(frameCount) = missed;
             % calculate compute timings
             computeTimes(frameCount)   = t_preflip - drawStart;          % draw-only time
             slackTimes(frameCount)     = flipWhen   - t_preflip;          % time left before deadline
             draw2flipTimes(frameCount) = vbl         - drawStart;         % includes PTB wait
-
+ 
             vbls(frameCount)       = vbl;                                % actual flip time
             targetVBLs(frameCount) = vblPrev + waitframes * ifi;         % scheduled target
-
+ 
             % --- Lightweight exit check ---------------------------------
             [keyIsDown, ~, keyCode] = KbCheck;
             if keyIsDown && keyCode(KbName('ESCAPE')), break; end
@@ -267,7 +287,7 @@ function flicker_protocol_two_images_hybrid
     end
     cleanup(win, textures);
     Priority(0);
-
+ 
     %% --------------------------------------------------------------------
     %  DIAGNOSTICS (timing & modulation)
     % ---------------------------------------------------------------------
@@ -275,12 +295,13 @@ function flicker_protocol_two_images_hybrid
     plot_modulation_diagnostics_img( ...
         mod_signals, all_mod_lum, t, code_long_all, ...
         flickerModes, vbls, targetVBLs, [areas.carrierHz], ifi, areas, ...
-        computeTimes, slackTimes, draw2flipTimes);
-
+        computeTimes, slackTimes, draw2flipTimes, waitframes, missedFrames)
+    
+     
 end
-
+ 
 %% ===========================  HELPERS  ==================================
-
+ 
 function [areas, mod_signals, all_mod_lum, code_long_all] = precompute_area_modulations(areas, t)
 % PRECOMPUTE_AREA_MODULATIONS
 % ---------------------------
@@ -299,14 +320,14 @@ T = numel(t); nAreas = numel(areas);
 mod_signals   = zeros(nAreas, T);   % store map01 (0..1) for all modes
 all_mod_lum   = zeros(nAreas, T);
 code_long_all = cell(1,nAreas);
-
+ 
 for k = 1:nAreas
     A = areas(k);
-
+ 
     % --- Trial-level Hann envelope (fade-in/out) --------------------------
     tf = 0;
     if isfield(A,'trialTaperFrames') && ~isempty(A.trialTaperFrames)
-        tf = max(0, min(A.trialTaperFrames, floor(T/2)));  % clamp to ≤ T/2
+        tf = max(0, min(A.trialTaperFrames, floor(T/2)));  % clamp to ? T/2
     end
     env = ones(1,T);                        % default: no taper
     if tf > 0
@@ -314,7 +335,7 @@ for k = 1:nAreas
         env(1:tf)           = w(1:tf);      % fade-in
         env(end-tf+1:end)   = w(tf+1:end);  % fade-out
     end
-
+ 
     % --- Expand & smooth code if needed ----------------------------------
     code_long = [];
     if ~isempty(A.code)
@@ -322,52 +343,52 @@ for k = 1:nAreas
         nrep = ceil(T / numel(code_expanded));
         code_long = repmat(code_expanded, 1, nrep);
         code_long = code_long(1:T);
-
+ 
         % Safety warning if ramps too long for bit duration
         if A.ramp_len >= A.framesPerBit/2
             warning('ramp_len (%d) >= framesPerBit/2 (%g): ramps will overlap and flatten bits.', ...
                     A.ramp_len, A.framesPerBit/2);
         end
-
+ 
         code_long = raised_cosine_smooth(code_long, A.ramp_len); % smooth 0/1 edges
     end
-
+ 
     % --- Base carrier (map01: 0..1) --------------------------------------
     carrier01 = 0.5 + 0.5 * sin(2*pi*A.carrierHz*t);   % [0,1]
-
+ 
     % --- Mode selection with contrast-preserving taper -------------------
     switch lower(A.flickerMode)
         case 'freq'
             % Taper deviation around mid-gray to keep mean constant
             c = (carrier01 - 0.5) .* env;      % contrast in [-0.5,0.5]
             map01 = 0.5 + c;                   % back to [0,1]
-
+ 
         case 'code'
             assert(~isempty(code_long), 'Area %d is code-mode but code missing.', k);
             c = (code_long - 0.5) .* env;      % center 0/1 to [-0.5,0.5]
             map01 = 0.5 + c;                   % [0,1]
-
+ 
         case 'hybrid'
             assert(~isempty(code_long), 'Area %d is hybrid-mode but code missing.', k);
-            % Bipolar code × bipolar carrier → taper → map to [0,1]
+            % Bipolar code × bipolar carrier ? taper ? map to [0,1]
             mod_bipolar = (2*code_long - 1) .* (2*carrier01 - 1);  % [-1,1]
             mod_bipolar = mod_bipolar .* env;                      % taper
             map01 = (mod_bipolar + 1)/2;                           % [0,1]
-
+ 
         otherwise
             error('Unknown flickerMode: %s', A.flickerMode);
     end
-
+ 
     % Store
     mod_signals(k,:) = map01;                                  % [0,1]
     all_mod_lum(k,:) = A.lb + (A.hb - A.lb) * map01;           % luminance 0..255
-
+ 
     areas(k).code_long  = code_long;
     areas(k).mod_signal = map01;
     code_long_all{k}    = code_long;
 end
 end
-
+ 
 function cleanup(win, textures)
 % CLEANUP
 % -------
@@ -375,11 +396,11 @@ function cleanup(win, textures)
     for i = 1:numel(textures), Screen('Close', textures(i)); end
     sca; ShowCursor;
 end
-
+ 
 function plot_modulation_diagnostics_img(mod_signals, all_mod_lum, t, code_long_all, ...
     flickerModeList, vbls, targetVBLs, carrierHzs, ifi, areas, ...
-    computeTimes, slackTimes, draw2flipTimes)
-
+    computeTimes, slackTimes, draw2flipTimes, waitframes, missedFrames)
+ 
 % PLOT_MODULATION_DIAGNOSTICS_IMG
 % -------------------------------
 % Visual diagnostics for:
@@ -389,11 +410,22 @@ function plot_modulation_diagnostics_img(mod_signals, all_mod_lum, t, code_long_
 %   - timing error histogram & intervals
 %   - flip timing error over time
 nAreas = size(mod_signals,1);
-actual_intervals = diff(vbls);
-scheduled_intervals = diff(targetVBLs);
-timing_error = vbls - targetVBLs;
-
-% Collect names with fallback
+actual_intervals    = diff(vbls);
+scheduled_intervals = diff(targetVBLs(2:end));
+timing_error        = vbls(2:end) - targetVBLs(2:end);
+expected_interval   = ifi * waitframes;
+ 
+% Heuristic dropped frames
+droppedHeuristic = [false, actual_intervals > 1.2*expected_interval];
+ 
+% PTB-reported missed flips
+droppedPTB = missedFrames > 0;
+ 
+% Print both
+fprintf('Dropped frames (heuristic >1.2× IFI): %d (%.2f%%)\n', ...
+    sum(droppedHeuristic), 100*mean(droppedHeuristic));
+fprintf('Missed flips (PTB flag):             %d (%.2f%%)\n', ...
+    sum(droppedPTB), 100*mean(droppedPTB));
 names = cell(1, nAreas);
 for k = 1:nAreas
     if isfield(areas,'name') && numel(areas) >= k && ~isempty(areas(k).name)
@@ -406,9 +438,9 @@ fprintf('Compute time (draw only):   mean %.3f ms, p95 %.3f ms, max %.3f ms\n', 
     mean(computeTimes,'omitnan')*1000, prctile(computeTimes,95)*1000, max(computeTimes));
 fprintf('Slack before deadline:      mean %.3f ms, p05 %.3f ms, min %.3f ms\n', ...
     mean(slackTimes,'omitnan')*1000, prctile(slackTimes,5)*1000, min(slackTimes));
-fprintf('Draw→Flip wall time:        mean %.3f ms\n', mean(draw2flipTimes,'omitnan')*1000);
+fprintf('Draw?Flip wall time:        mean %.3f ms\n', mean(draw2flipTimes,'omitnan')*1000);
 disp(repmat('_',1,100));
-
+ 
 fprintf('\n=== Frame Timing Diagnostics ===\n');
 fprintf('Mean actual interval: %.5f s (%.2f Hz), SD: %.5f ms\n', ...
     mean(actual_intervals), 1/mean(actual_intervals), std(actual_intervals)*1000);
@@ -416,11 +448,11 @@ fprintf('Mean scheduled interval: %.5f s (%.2f Hz)\n', ...
     mean(scheduled_intervals), 1/mean(scheduled_intervals));
 fprintf('Mean abs. timing error: %.5f ms (SD: %.5f ms)\n', ...
     mean(abs(timing_error))*1000, std(timing_error)*1000);
-
+ 
 figure('Name','Image Flicker Diagnostics','NumberTitle','off');
 tl = tiledlayout(6, max(2,nAreas), 'TileSpacing','compact');
-
-
+ 
+ 
 % Row 1: code sequences (binary -> stairs; smoothed -> plot)
 for k = 1:nAreas
     nexttile;
@@ -432,7 +464,7 @@ for k = 1:nAreas
     end
     grid on; xlabel('Frame'); ylabel('Code');
 end
-
+ 
 % Row 2: luminance time series
 for k = 1:nAreas
     nexttile;
@@ -442,7 +474,7 @@ for k = 1:nAreas
     title(sprintf('%s — lum (%s, %.2f Hz)', names{k}, fm, chz));
     grid on; xlabel('Time (s)'); ylabel('Lum');
 end
-
+ 
 % % Row 3: autocorrelation per area
 % for k = 1:nAreas
 %     nexttile;
@@ -451,13 +483,13 @@ end
 %     title(sprintf('Area %d: autocorr',k));
 %     grid on; xlabel('Lag (frames)'); ylabel('Norm. corr');
 % end
-
+ 
 % Row 4: histogram + intervals
 nexttile([1 max(1,ceil(nAreas/2))]);
 histogram(timing_error*1000, 30);
 xlabel('Timing Error (ms)'); ylabel('Count');
 title('Flip timing error histogram'); grid on;
-
+ 
 nexttile([1 max(1,floor(nAreas/2))]);
 h1 = plot(actual_intervals*1000,'-o'); hold on;
 h2 = plot(scheduled_intervals*1000,'--');
@@ -465,33 +497,39 @@ h3 = yline(ifi*1000, 'k-');
 ylabel('Frame Interval (ms)');
 legend([h1 h2 h3], {'Actual','Scheduled',sprintf('IFI=%.2f ms',ifi*1000)}, 'Location','best');
 grid on; title('Frame intervals');
-
+ 
 % Row 5: time series of flip timing error
 nexttile([1 max(1,nAreas)]);
-plot(timing_error*1000,'-o');
+plot(timing_error*1000,'-o'); hold on;
+%plot(find(droppedHeuristic), timing_error(droppedHeuristic)*1000, ...
+%    'ro', 'MarkerFaceColor','r');   % heuristic
+plot(find(droppedPTB), timing_error(droppedPTB)*1000, ...
+    'bs', 'MarkerFaceColor','b');   % PTB flag
 xlabel('Frame #'); ylabel('Timing error (ms)');
-title('Flip timing error over time'); grid on;
-
+title('Flip timing error over time');
+legend({'Error','PTB missed'}, 'Location','best');
+grid on;
+ 
 nomHz = 1/ifi;
 d = diff(vbls);
 effHz = 1/mean(d);
 jitter_ms = std(d)*1000;
-
+ 
 % Row 6: compute-time + slack histograms
 nexttile([1 max(1,ceil(nAreas/2))]);
 histogram(computeTimes*1000, 30);
 xlabel('Compute time (ms)'); ylabel('Count');
 title('Draw-only time per frame'); grid on;
-
+ 
 nexttile([1 max(1,floor(nAreas/2))]);
 histogram(slackTimes*1000, 30);
 xlabel('Slack before flip deadline (ms)'); ylabel('Count');
 title('Time budget remaining at Flip call'); grid on;
-
+ 
 title(tl, sprintf('Diagnostics | nAreas=%d | Nominal=%.2f Hz | Achieved=%.2f Hz | Jitter=%.2f ms', ...
                   nAreas, nomHz, effHz, jitter_ms));
 end
-
+ 
 function y = raised_cosine_smooth(x, ramp_len)
 % RAISED_COSINE_SMOOTH
 % --------------------
@@ -500,26 +538,26 @@ function y = raised_cosine_smooth(x, ramp_len)
     y = x;
     N = numel(x);
     if ramp_len <= 0 || N < 3, return; end
-
+ 
     % Indices of NEW value (i+1 where diff~=0)
     trans = find(diff(x) ~= 0) + 1;
-
+ 
     for m = 1:numel(trans)
         i  = trans(m);                      % index where new value starts
         a0 = x(max(1, i-1));                % old level (0 or 1)
         a1 = x(i);                          % new level (0 or 1)
-
+ 
         i0 = max(1, i - ramp_len);          % left boundary
         i1 = min(N, i + ramp_len - 1);      % right boundary
         L  = i1 - i0 + 1;
         if L < 2, continue; end
-
+ 
         u  = linspace(0, 1, L);             % 0..1 across local window
-        r  = 0.5 * (1 - cos(pi * u));       % monotonic raised-cosine 0→1
-        y(i0:i1) = (1 - r) .* a0 + r .* a1; % crossfade old→new
+        r  = 0.5 * (1 - cos(pi * u));       % monotonic raised-cosine 0?1
+        y(i0:i1) = (1 - r) .* a0 + r .* a1; % crossfade old?new
     end
 end
-
+ 
 function s = makeStim(args)
 % MAKESTIM
 % --------
@@ -533,14 +571,14 @@ defaults = struct( ...
   'flickerMode','hybrid','carrierHz',6,'code',[], ...
   'framesPerBit',1,'ramp_len',2, ...
   'trialTaperFrames',[]); % Hann taper frames (or [] for none)
-
+ 
 s = defaults;
 fn = fieldnames(args);
 for i=1:numel(fn), s.(fn{i}) = args.(fn{i}); end
 assert(~isempty(s.file) && ~isempty(s.x) && ~isempty(s.y), ...
   'Stim needs file, x, y.');
 end
-
+ 
 function a = makeFeatherMask(sz, coreFrac, sigmaPx)
 % MAKEFEATHERMASK
 % ---------------
@@ -560,3 +598,6 @@ function a = makeFeatherMask(sz, coreFrac, sigmaPx)
     g  = exp(-max(0, r - r0).^2 / (2*sigmaPx^2));  % Gaussian falloff outside
     a  = uint8(255 * min(max(g,0),1));
 end
+ 
+ 
+ 
