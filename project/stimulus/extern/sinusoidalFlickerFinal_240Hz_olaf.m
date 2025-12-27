@@ -1,4 +1,5 @@
-Dfunction sinusoidalFlickerFinal_240Hz(window, ifi, numCycles, DURATION_TRIGGER, address)
+function sinusoidalFlickerFinal_240Hz_olaf(window, ifi, numCycles, DURATION_TRIGGER, address)
+
 
 %% (Pseudo)Sinusoidal flicker for testing 240 Hz OLED response times
 % This function creates a pseudosinusoidal flicker that iterates from black
@@ -99,4 +100,5 @@ end
 
 if ~isnan(DURATION_TRIGGER)
     sendtrigger(address, 66, DURATION_TRIGGER);
+end
 end
