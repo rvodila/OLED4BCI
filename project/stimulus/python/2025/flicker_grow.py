@@ -1,7 +1,9 @@
+
+
 # opacity_flicker_incremental_pairs.py
 # Photodiode box toggling every frame (upper-right) + growing set of (image + flicker overlay) pairs in the center box.
 # Per level: 10s static (no flicker) -> 100s flicker -> 10s baseline (no flicker), then add one more pair, up to 10.
-
+# %%
 import os
 import sys
 import platform
@@ -9,6 +11,8 @@ import psutil
 import numpy as np
 from psychopy import visual, core, event
 
+# %%
+# %%
 # -------------------- helpers --------------------
 def _safe_set_priority():
     """Best-effort process priority tweaks to reduce dropped frames."""
@@ -22,6 +26,7 @@ def _safe_set_priority():
         elif sysname in ("Linux", "Darwin"):
             try:
                 p.nice(-10)
+
             except Exception:
                 pass
     except Exception:
@@ -47,7 +52,32 @@ def _grid_in_box(n, box_w=600, box_h=800):
             k += 1
     return pos
 
+# PsychoPy Rect can raise a numpy 2.0 compatibility error in some versions.
+def _make_rect(win, width, height, pos, fillColor, lineColor, colorSpace, opacity=1.0):
+    try:
+        return visual.Rect(
+            win, width=width, height=height,
+            fillColor=fillColor, lineColor=lineColor, colorSpace=colorSpace,
+            pos=pos, opacity=opacity
+        )
+    except ValueError:
+        verts = [(-0.5, 0.5), (0.5, 0.5), (0.5, -0.5), (-0.5, -0.5)]
+        line_width = 0 if lineColor is None else 1
+        return visual.ShapeStim(
+            win,
+            vertices=verts,
+            size=(width, height),
+            pos=pos,
+            fillColor=fillColor,
+            lineColor=lineColor,
+            fillColorSpace=colorSpace,
+            lineColorSpace=colorSpace,
+            opacity=opacity,
+            lineWidth=line_width,
+            closeShape=True
+        )
 
+# %% 
 # -------------------- main --------------------
 def main():
     # -------------------- user params --------------------
@@ -116,10 +146,10 @@ def main():
     half_w, half_h = win.size[0] / 2.0, win.size[1] / 2.0
     diode_x = -half_w + diode_margin + diode_size / 2.0
     diode_y = half_h - diode_margin - diode_size / 2.0
-    diode = visual.Rect(
+    diode = _make_rect(
         win, width=diode_size, height=diode_size,
         fillColor=(0, 0, 0), lineColor=None, colorSpace="rgb255",
-        pos=(diode_x, diode_y)
+        pos=(diode_x, diode_y), opacity=1.0
     )
     diode_state_white = False  # toggled each frame
 
@@ -146,13 +176,13 @@ def main():
             )
         else:
             # Fallback: plain rectangle to mimic an image tile
-            img = visual.Rect(
+            img = _make_rect(
                 win, width=tile_w, height=tile_h,
                 fillColor=(200, 200, 200), lineColor=(80, 80, 80),
                 colorSpace="rgb255", pos=pos, opacity=1.0
             )
 
-        overlay = visual.Rect(
+        overlay = _make_rect(
             win, width=tile_w, height=tile_h,
             fillColor=(0, 0, 0), lineColor=None, colorSpace="rgb255",
             pos=pos, opacity=opacity_min  # start at min opacity
@@ -160,7 +190,7 @@ def main():
         tiles.append((img, overlay))
 
     # Optional: a faint guide box to visualize the stimulus region
-    # guide_box = visual.Rect(win, width=BOX_W, height=BOX_H, lineColor='red', fillColor=None, lineWidth=2, pos=(0, 0))
+    # guide_box = _make_rect(win, width=BOX_W, height=BOX_H, fillColor=None, lineColor=(255, 0, 0), colorSpace="rgb255", pos=(0, 0), opacity=1.0)
 
     # Phases for sine opacity
     phases_all = np.random.uniform(0, 2*np.pi, size=max_stimuli) if randomize_phase else np.zeros(max_stimuli)
@@ -278,6 +308,7 @@ def main():
     win.close()
     core.quit()
 
-
+# %%
 if __name__ == "__main__":
     main()
+

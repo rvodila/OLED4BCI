@@ -1,2 +1,9 @@
 /literature/
 /project/data/
+
+# Python bytecode caches
+__pycache__/
+*.py[cod]
+
+# Local media artifacts (too large for normal Git history)
+/project/stimulus/python/2026/*.mp4
