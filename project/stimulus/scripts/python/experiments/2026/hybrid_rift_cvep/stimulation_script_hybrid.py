@@ -8,6 +8,7 @@ import random
 import numpy as np
 from psychopy import core, visual
 from psychopy.hardware import keyboard
+from psychopy.tools.attributetools import undefined
 
 
 # =========================
@@ -51,7 +52,7 @@ EXPERIMENT = {
         "trials_per_run": 8,
     },
     "timing": {
-        "rift_trial_duration_s": 15.0,
+        "stimulation_trial_duration_s": 15.0,
         "localizer_trial_duration_s": 15.0,
         "localizer_segment_s": 2.0,
         "trial_onset_jitter_min_s": 0.2,
@@ -59,22 +60,22 @@ EXPERIMENT = {
     },
     "flicker": {
         # Aligns with MATLAB dualFlickerStimulus.m defaults.
-        "frames_per_bit": 6,
+        "frames_per_bit": 12,
         "ramp_len_frames": 2,
         "trial_taper_frames": 60,
         "opacity_min_255": 20,
         "opacity_max_255": 230,
         "codebook_npz": "metadata/mgold_61_6521.npz",
     },
-    "rift": {
+    "stimulation": {
         "targets_per_trial": 3,
         # Modes: periodic | alternating | code | hybrid
         # Aliases: freq -> periodic, alt -> alternating
         "channels": [
-            {"mode": "hybrid", "carrier_hz": 10.0, "code_row": 0},
-            {"mode": "hybrid", "carrier_hz": 15.0, "code_row": 1},
-            {"mode": "periodic", "carrier_hz": 3.0},
-            {"mode": "alternating", "carrier_hz": 0.0},
+            {"mode": "hybrid", "carrier_hz": 30.0, "code_row": 0},
+            {"mode": "code", "carrier_hz": 15.0, "code_row": 1},
+            {"mode": "code", "carrier_hz": 3.0, "code_row": 2},
+            {"mode": "code", "carrier_hz": 0.0, "code_row": 3},
         ],
     },
     "localizer": {
@@ -158,7 +159,7 @@ def build_run_trial_sequences(n_runs, trials_per_run, seed):
     trials_per_type = trials_per_run // 2
     run_sequences = []
     for _ in range(n_runs):
-        run_seq = (["rift"] * trials_per_type) + (["localizer"] * trials_per_type)
+        run_seq = (["stimulation"] * trials_per_type) + (["localizer"] * trials_per_type)
         rng.shuffle(run_seq)
         run_sequences.append(run_seq)
     return run_sequences
@@ -401,8 +402,7 @@ def update_opto_square():
         frames_per_bit=FRAMES_PER_BIT,
     )
     color = OPTO_COLOR_ON if map01 >= 0.5 else OPTO_COLOR_OFF
-    opto_square.fillColor = color
-    opto_square.lineColor = color
+    opto_square.color = color
     OPTO_FRAME_COUNTER += 1
 
 
@@ -457,7 +457,7 @@ def describe_channel(idx, spec):
 N_RUNS = int(EXPERIMENT["design"]["n_runs"])
 RUN_DURATION_MIN = float(EXPERIMENT["design"]["run_duration_min"])
 TRIALS_PER_RUN = int(EXPERIMENT["design"]["trials_per_run"])
-RIFT_TRIAL_DURATION_S = float(EXPERIMENT["timing"]["rift_trial_duration_s"])
+STIMULATION_TRIAL_DURATION_S = float(EXPERIMENT["timing"]["stimulation_trial_duration_s"])
 LOCALIZER_TRIAL_DURATION_S = float(EXPERIMENT["timing"]["localizer_trial_duration_s"])
 LOCALIZER_SEGMENT_S = float(EXPERIMENT["timing"]["localizer_segment_s"])
 TRIAL_ONSET_JITTER_MIN_S = float(EXPERIMENT["timing"]["trial_onset_jitter_min_s"])
@@ -470,8 +470,8 @@ OPACITY_MIN_255 = int(EXPERIMENT["flicker"]["opacity_min_255"])
 OPACITY_MAX_255 = int(EXPERIMENT["flicker"]["opacity_max_255"])
 CODEBOOK_PATH_SETTING = EXPERIMENT["flicker"]["codebook_npz"]
 
-RIFT_CHANNELS = list(EXPERIMENT["rift"]["channels"])
-TARGETS_PER_TRIAL = int(EXPERIMENT["rift"]["targets_per_trial"])
+STIMULATION_CHANNELS = list(EXPERIMENT["stimulation"]["channels"])
+STIMULATION_TARGETS_PER_TRIAL = int(EXPERIMENT["stimulation"]["targets_per_trial"])
 
 LOCALIZER_ORDER = tuple(EXPERIMENT["localizer"]["order"])
 LOCALIZER_OTHERS = str(EXPERIMENT["localizer"]["others"]).lower()
@@ -484,12 +484,12 @@ OPTO_MARGIN_PX = int(EXPERIMENT["opto"]["margin_px"])
 OPTO_MODE = canonical_mode(EXPERIMENT["opto"]["mode"])
 OPTO_CARRIER_HZ = float(EXPERIMENT["opto"].get("carrier_hz", 0.0))
 
-if len(RIFT_CHANNELS) != 4:
-    raise ValueError("rift.channels must contain exactly 4 channel specs.")
+if len(STIMULATION_CHANNELS) != 4:
+    raise ValueError("stimulation.channels must contain exactly 4 channel specs.")
 if len(LOCALIZER_CHANNELS) != 4:
     raise ValueError("localizer.channels must contain exactly 4 channel specs.")
-if any(canonical_mode(spec.get("mode", "periodic")) not in ALLOWED_MODES for spec in RIFT_CHANNELS):
-    raise ValueError("One or more RIFT channel modes are invalid.")
+if any(canonical_mode(spec.get("mode", "periodic")) not in ALLOWED_MODES for spec in STIMULATION_CHANNELS):
+    raise ValueError("One or more stimulation channel modes are invalid.")
 if any(canonical_mode(spec.get("mode", "periodic")) not in ALLOWED_MODES for spec in LOCALIZER_CHANNELS):
     raise ValueError("One or more localizer channel modes are invalid.")
 if OPACITY_MIN_255 < 0 or OPACITY_MAX_255 > 255 or OPACITY_MIN_255 >= OPACITY_MAX_255:
@@ -498,8 +498,8 @@ if FRAMES_PER_BIT <= 0:
     raise ValueError("flicker.frames_per_bit must be >= 1.")
 if RAMP_LEN_FRAMES < 0:
     raise ValueError("flicker.ramp_len_frames must be >= 0.")
-if TARGETS_PER_TRIAL < 0:
-    raise ValueError("rift.targets_per_trial must be >= 0.")
+if STIMULATION_TARGETS_PER_TRIAL < 0:
+    raise ValueError("stimulation.targets_per_trial must be >= 0.")
 if LOCALIZER_CYCLES_PER_TRIAL <= 0:
     raise ValueError("localizer.cycles_per_trial must be >= 1.")
 if LOCALIZER_OTHERS not in {"off", "on"}:
@@ -507,10 +507,10 @@ if LOCALIZER_OTHERS not in {"off", "on"}:
 if TRIAL_ONSET_JITTER_MIN_S < 0.0 or TRIAL_ONSET_JITTER_MAX_S < TRIAL_ONSET_JITTER_MIN_S:
     raise ValueError("Invalid trial onset jitter range.")
 
-if not math.isclose(RIFT_TRIAL_DURATION_S, LOCALIZER_TRIAL_DURATION_S, rel_tol=0.0, abs_tol=1e-9):
-    raise ValueError("RIFT and localizer trial durations must be equal for balanced run timing.")
+if not math.isclose(STIMULATION_TRIAL_DURATION_S, LOCALIZER_TRIAL_DURATION_S, rel_tol=0.0, abs_tol=1e-9):
+    raise ValueError("stimulation and localizer trial durations must be equal for balanced run timing.")
 
-TRIAL_DURATION_S = float(RIFT_TRIAL_DURATION_S)
+TRIAL_DURATION_S = float(STIMULATION_TRIAL_DURATION_S)
 RUN_DURATION_S = RUN_DURATION_MIN * 60.0
 if not math.isclose(TRIALS_PER_RUN * TRIAL_DURATION_S, RUN_DURATION_S, rel_tol=0.0, abs_tol=1e-6):
     raise ValueError("trials_per_run * trial_duration_s must equal run_duration_min * 60.")
@@ -519,7 +519,7 @@ if TRIALS_PER_RUN % 2 != 0:
 
 TRIALS_PER_TYPE_PER_RUN = TRIALS_PER_RUN // 2
 TOTAL_TRIALS = N_RUNS * TRIALS_PER_RUN
-RIFT_TRIALS_TOTAL = N_RUNS * TRIALS_PER_TYPE_PER_RUN
+STIMULATION_TRIALS_TOTAL = N_RUNS * TRIALS_PER_TYPE_PER_RUN
 LOCALIZER_TRIALS_TOTAL = N_RUNS * TRIALS_PER_TYPE_PER_RUN
 TOTAL_ACTIVE_DURATION_S = N_RUNS * RUN_DURATION_S
 TOTAL_DURATION_MIN = TOTAL_ACTIVE_DURATION_S / 60.0
@@ -555,15 +555,15 @@ SEEN_KEY_EVENTS = set()
 OPTO_FRAME_COUNTER = 0
 
 INSTRUCTION_TEXT = (
-    "Welcome.\\n\\n"
-    "Attend the target and respond with SPACE when fixation turns red.\\n"
-    "Press ESC at any time to quit.\\n\\n"
+    "Welcome.\n\n"
+    "Attend the target and respond with SPACE when fixation turns red.\n"
+    "Press ESC at any time to quit.\n\n"
     "Press SPACE to start."
 )
 POST_EXPERIMENT_TEXT = (
-    "This experiment is complete.\\n\\n"
-    "Thank you for participating.\\n\\n"
-    "Please wait for the experimenter.\\n"
+    "This experiment is complete.\n\n"
+    "Thank you for participating.\n\n"
+    "Please wait for the experimenter.\n"
     "Press SPACE to close."
 )
 
@@ -582,7 +582,7 @@ print(f"Session ID: {SESSION_ID}")
 print(f"Random seed: {RANDOM_SEED}")
 print(f"Design: {N_RUNS} runs x {RUN_DURATION_MIN:.1f} min, {TRIALS_PER_RUN} trials/run")
 print(
-    f"RIFT: {RIFT_TRIALS_TOTAL} trials total "
+    f"STIMULATION: {STIMULATION_TRIALS_TOTAL} trials total "
     f"({TRIALS_PER_TYPE_PER_RUN} per run x {N_RUNS} runs)"
 )
 print(
@@ -591,7 +591,7 @@ print(
 )
 print(
     f"Localizer cycles per trial: {LOCALIZER_CYCLES_PER_TRIAL}; "
-    f"RIFT targets per trial: {TARGETS_PER_TRIAL}"
+    f"Stimulation targets per trial: {STIMULATION_TARGETS_PER_TRIAL}"
 )
 print(
     f"Trial onset jitter: {TRIAL_ONSET_JITTER_MIN_S * 1000:.0f}-{TRIAL_ONSET_JITTER_MAX_S * 1000:.0f} ms"
@@ -601,8 +601,8 @@ print(
     f"Flicker shared params: frames_per_bit={FRAMES_PER_BIT}, "
     f"ramp_len={RAMP_LEN_FRAMES}, taper={TRIAL_TAPER_FRAMES} frames"
 )
-print("RIFT channel modes:")
-for i, spec in enumerate(RIFT_CHANNELS):
+print("Stimulation channel modes:")
+for i, spec in enumerate(STIMULATION_CHANNELS):
     print("  " + describe_channel(i, spec))
 print("Localizer channel modes:")
 for i, spec in enumerate(LOCALIZER_CHANNELS):
@@ -655,6 +655,8 @@ for pos in QUAD_POSITIONS:
         fillColor=RECT_BG_COLOR,
         lineColor=RECT_BG_COLOR,
         colorSpace="rgb",
+        lineRGB=undefined,
+        fillRGB=undefined,
         opacity=1.0,
     )
     fg = visual.Circle(
@@ -665,6 +667,8 @@ for pos in QUAD_POSITIONS:
         fillColor=RECT_FG_COLOR,
         lineColor=RECT_FG_COLOR,
         colorSpace="rgb",
+        lineRGB=undefined,
+        fillRGB=undefined,
         opacity=FG_OPACITY_OFF,
     )
 
@@ -689,6 +693,8 @@ if OPTO_ENABLED:
         fillColor=OPTO_COLOR_OFF,
         lineColor=OPTO_COLOR_OFF,
         colorSpace="rgb",
+        lineRGB=undefined,
+        fillRGB=undefined,
     )
     opto_square.autoDraw = True
 
@@ -696,9 +702,9 @@ if OPTO_ENABLED:
 # =========================
 # Routines
 # =========================
-def run_trial_rift(duration_s, run_idx=None, trial_idx=None):
+def run_trial_stimulation(duration_s, run_idx=None, trial_idx=None):
     opacity_traces = build_trial_opacity_traces(
-        channel_specs=RIFT_CHANNELS,
+        channel_specs=STIMULATION_CHANNELS,
         duration_s=duration_s,
         fps=fps,
         taper_frames=TRIAL_TAPER_FRAMES,
@@ -706,7 +712,7 @@ def run_trial_rift(duration_s, run_idx=None, trial_idx=None):
     n_frames = opacity_traces.shape[1]
 
     response_window_frames = seconds_to_frames(TARGET_RESPONSE_WINDOW_S, fps)
-    target_onsets_s = build_target_onsets(duration_s, TARGETS_PER_TRIAL)
+    target_onsets_s = build_target_onsets(duration_s, STIMULATION_TARGETS_PER_TRIAL)
     next_target_idx = 0
     target_id_counter = 0
     active_target = None
@@ -755,9 +761,9 @@ def run_trial_rift(duration_s, run_idx=None, trial_idx=None):
         win.flip()
 
         keys = poll_keyboard(
-            context="rift",
+            context="stimulation",
             run_idx=run_idx,
-            trial_type="rift",
+            trial_type="stimulation",
             trial_idx=trial_idx,
         )
         if keys:
@@ -925,12 +931,12 @@ def main(run_trial_sequences):
     for run_idx, run_trials in enumerate(run_trial_sequences, start=1):
         if run_idx >= 2:
             show_info_screen(
-                text="Take a break if needed.\\nPress SPACE to continue.",
+                text="Take a break if needed.\nPress SPACE to continue.",
                 context="break_screen",
                 run_idx=run_idx,
             )
         show_info_screen(
-            text=f"Run {run_idx}/{N_RUNS}\\nPress SPACE to continue.",
+            text=f"Run {run_idx}/{N_RUNS}\nPress SPACE to continue.",
             context="run_intro_screen",
             run_idx=run_idx,
         )
@@ -943,11 +949,11 @@ def main(run_trial_sequences):
             fg.opacity = FG_OPACITY_OFF
         fixation.autoDraw = True
 
-        n_rift_in_run = run_trials.count("rift")
+        n_stimulation_in_run = run_trials.count("stimulation")
         n_localizer_in_run = run_trials.count("localizer")
         print(
             f"Run {run_idx}/{N_RUNS}: "
-            f"{n_rift_in_run} rift + {n_localizer_in_run} localizer trials"
+            f"{n_stimulation_in_run} stimulation + {n_localizer_in_run} localizer trials"
         )
         # TIMESTAMP HOOK: run_start (after run intro acknowledged).
         run_start_s = EXP_CLOCK.getTime()
@@ -963,7 +969,7 @@ def main(run_trial_sequences):
             )
 
             # Reset foregrounds and fixation state at trial start.
-            if trial_type == "rift":
+            if trial_type == "stimulation":
                 for bg in bg_circles:
                     bg.opacity = 1.0
             else:
@@ -973,9 +979,9 @@ def main(run_trial_sequences):
                 fg.opacity = FG_OPACITY_OFF
             fixation.color = FIX_COLOR_BASE
 
-            if trial_type == "rift":
-                run_trial_rift(
-                    duration_s=RIFT_TRIAL_DURATION_S,
+            if trial_type == "stimulation":
+                run_trial_stimulation(
+                    duration_s=STIMULATION_TRIAL_DURATION_S,
                     run_idx=run_idx,
                     trial_idx=trial_idx,
                 )
