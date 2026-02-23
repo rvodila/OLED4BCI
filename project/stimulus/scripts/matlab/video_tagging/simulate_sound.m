@@ -1,4 +1,5 @@
 % Parameters
+[~, assetsDir] = resolve_stimulus_paths();
 audioLen = 17;          % total length (seconds)
 nChirps = 15;            % number of chirps
 chirp_dur = nChirps / audioLen - 0.2;        % duration of each chirp (seconds)
@@ -38,7 +39,7 @@ end
 audio = audio / max(abs(audio)) * 0.98;
 
 % --- 4. Save
-outdir = fullfile(pwd, 'project', 'stimulus', 'audio_files');
+outdir = fullfile(assetsDir, 'audio');
 if ~exist(outdir, 'dir'), mkdir(outdir); end
 
 outfile = fullfile(outdir, ...
@@ -57,3 +58,11 @@ xlim([0 audioLen]); grid on;
 % --- 6. Play
 % sound(audio, fs)
 fprintf('Audio file saved to: %s\n', outfile);
+
+function [stimulusRoot, assetsDir] = resolve_stimulus_paths()
+% Resolve project-relative directories from this script location.
+    thisFileDir = fileparts(mfilename('fullpath'));
+    stimulusRoot = fileparts(fileparts(fileparts(thisFileDir)));
+    assetsDir = fullfile(stimulusRoot, 'assets');
+    assert(exist(assetsDir, 'dir') == 7, 'Assets directory not found: %s', assetsDir);
+end

@@ -11,9 +11,10 @@ function flicker_protocol_video_hybrid
     maxDisplayLen = 150;            % seconds (max playback duration)
     ramp_len = 4;                 % for raised cosine smoothing
     rectW = 300; rectH = 150;     % default area size
-    movieFile = fullfile(pwd, 'project', 'stimulus', 'images', 'ape_walk.mp4'); % 25Hz, 17s, 950x540
-    codefile = fullfile(pwd, 'project', 'stimulus', 'codes', 'mgold_61_6521.mat');
-    audiofile = fullfile(pwd, 'project', 'stimulus', 'audio_files', 'chirpNoise_15chirps_0.68sDur_400Hz-4000Hz_17s.wav');
+    [~, assetsDir] = resolve_stimulus_paths();
+    movieFile = fullfile(assetsDir, 'videos', 'ape_walk.mp4'); % 25Hz, 17s, 950x540
+    codefile = fullfile(assetsDir, 'codes', 'mgold_61_6521.mat');
+    audiofile = fullfile(assetsDir, 'audio', 'chirpNoise_15chirps_0.68sDur_400Hz-4000Hz_17s.wav');
 
     % Load codes once
     S = load(codefile);
@@ -441,4 +442,12 @@ function code_smooth = raised_cosine_smooth(code_long, ramp_len)
             end
         end
     end
+end
+
+function [stimulusRoot, assetsDir] = resolve_stimulus_paths()
+% Resolve project-relative directories from this script location.
+    thisFileDir = fileparts(mfilename('fullpath'));
+    stimulusRoot = fileparts(fileparts(fileparts(thisFileDir)));
+    assetsDir = fullfile(stimulusRoot, 'assets');
+    assert(exist(assetsDir, 'dir') == 7, 'Assets directory not found: %s', assetsDir);
 end

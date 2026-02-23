@@ -18,12 +18,13 @@ function flicker_protocol_two_images_hybrid
     imgSigmaPx      = 2;    % Gaussian sigma (in *pixels*) for image blur
     overlaySigmaPx  = 40;   % Gaussian sigma for the overlay’s spatial falloff
 
-    imageFiles = {fullfile(pwd, 'project', 'stimulus', 'images', 'capybara.png'), ...
-                  fullfile(pwd, 'project', 'stimulus', 'images', 'zebra2.png')};
+    [~, assetsDir] = resolve_stimulus_paths();
+    imageFiles = {fullfile(assetsDir, 'images', 'capybara.png'), ...
+                  fullfile(assetsDir, 'images', 'zebra2.png')};
     ramp_len = 4; % number of frames over which to smooth transitions
 
     %% ---- CODE FILE ----
-    codefile = fullfile(pwd, 'project', 'stimulus', 'files', 'mgold_61_6521.mat');
+    codefile = fullfile(assetsDir, 'codes', 'mgold_61_6521.mat');
     S = load(codefile);
     code  = double(S.codes(1, :));
     code2 = double(S.codes(2, :));
@@ -298,5 +299,13 @@ function code_smooth = raised_cosine_smooth(code_long, ramp_len)
             end
         end
     end
+end
+
+function [stimulusRoot, assetsDir] = resolve_stimulus_paths()
+% Resolve project-relative directories from this script location.
+    thisFileDir = fileparts(mfilename('fullpath'));
+    stimulusRoot = fileparts(fileparts(fileparts(thisFileDir)));
+    assetsDir = fullfile(stimulusRoot, 'assets');
+    assert(exist(assetsDir, 'dir') == 7, 'Assets directory not found: %s', assetsDir);
 end
 

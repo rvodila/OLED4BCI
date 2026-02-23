@@ -9,6 +9,7 @@ import sys
 import platform
 import psutil
 import numpy as np
+from pathlib import Path
 from psychopy import visual, core, event
 
 # %%
@@ -77,6 +78,15 @@ def _make_rect(win, width, height, pos, fillColor, lineColor, colorSpace, opacit
             closeShape=True
         )
 
+
+def _find_stimulus_root(start_dir: Path) -> Path:
+    for candidate in [start_dir, *start_dir.parents]:
+        if (candidate / "assets" / "images").is_dir():
+            return candidate
+    raise FileNotFoundError(
+        f"Could not locate stimulus root from {start_dir}. Expected assets/images folder."
+    )
+
 # %% 
 # -------------------- main --------------------
 def main():
@@ -86,7 +96,8 @@ def main():
     fullscr        = True
 
     # Path to the image that will be replicated under each overlay
-    img_path       = r"C:\Users\Radovan\OneDrive\Radboud\Studentships\Linda Drijvers\project\stimulus\images\capybara.png"
+    stimulus_root  = _find_stimulus_root(Path(__file__).resolve().parent)
+    img_path       = stimulus_root / "assets" / "images" / "capybara.png"
 
     # Photodiode box (upper-right, alternates every frame)
     diode_size     = 80     # px
@@ -158,7 +169,7 @@ def main():
 
     # Build tiles: each tile = (ImageStim, Rect overlay)
     tiles = []
-    img_exists = os.path.isfile(img_path)
+    img_exists = img_path.is_file()
     if not img_exists:
         print(f"WARNING: image not found at {img_path}. Using gray fill instead of images.")
 
@@ -168,7 +179,7 @@ def main():
         if img_exists:
             img = visual.ImageStim(
                 win,
-                image=img_path,
+                image=str(img_path),
                 size=(tile_w, tile_h),
                 pos=pos,
                 units="pix",

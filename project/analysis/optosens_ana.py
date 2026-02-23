@@ -1,12 +1,14 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import pyxdf
+from pathlib import Path
 # %%
 # NOTE: This script mirrors the exploratory analysis from analysis/optosens_ana.ipynb.
 
-fpath = r"C:\Users\Radovan\OneDrive\Radboud\Studentships\Linda Drijvers\project\data\sourcedata\optosens\sub-P001_ses-S001_task-Default_run-001_eeg.xdf"
+project_root = Path(__file__).resolve().parents[1]
+fpath = project_root / "data" / "sourcedata" / "optosens" / "sub-P001_ses-S001_task-Default_run-001_eeg.xdf"
 
-stream, _ids = pyxdf.load_xdf(fpath)
+stream, _ids = pyxdf.load_xdf(str(fpath))
 
 # Basic extraction
 timestamps = stream[0]['time_stamps']

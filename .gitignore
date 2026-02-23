@@ -6,4 +6,5 @@ __pycache__/
 *.py[cod]
 
 # Local media artifacts (too large for normal Git history)
-/project/stimulus/python/2026/*.mp4
+/project/stimulus/scripts/python/experiments/2026/*.mp4
+/project/stimulus/archive/pycache/
